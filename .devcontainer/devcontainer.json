@@ -1,0 +1,22 @@
+{
+    "name": "My Codespace",
+    "image": "mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04",
+    "features": {
+        "ghcr.io/devcontainers/features/desktop-lite:1": {
+            "password": "vscode",
+            "webPort": "6080"
+        }
+    },
+    // Installs only the necessary libraries for your project
+    "postCreateCommand": "sudo apt-get update -y && sudo apt-get install -y valgrind libx11-dev libxext-dev libbsd-dev python3-pip && sudo python3 -m pip install --upgrade pip setuptools && sudo python3 -m pip install norminette",
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.pythonPath": "/usr/local/bin/python3"
+            }
+        },
+        "extensions": [
+            "ms-python.python"
+        ]
+    }
+}
