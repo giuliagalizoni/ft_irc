@@ -7,18 +7,21 @@
 #include <string>
 #include <cstring>
 
+#include <cstdlib> // TODO: remove
+
 #include "../includes/Server.hpp"
 
 int main(int argc, char **argv)
 {
 	if (argc != 3)
 	{
+		std::cout << "Usage: ./ircserv <port> <password>" << std::endl;
 		return 1; // TODO: exception
 	}
 
-	// TODO: parse function
-	Server server(std::stoi(argv[1]), argv[2]);
-	server.run();
+	// TODO: parsing function
+	Server server(std::atoi(argv[1]), argv[2]);
+	// server.run();
 }
 // FOR REFERENCE
 /*

@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <netinet/in.h>
+#include <unistd.h>
 
 Server::Server(int port, std::string password) : _port(port), _password(password)
 {
@@ -28,4 +29,16 @@ Server::Server(int port, std::string password) : _port(port), _password(password
 	_fds.push_back(server_fd);
 
 	std::cout << "Server started in port: " << _port << std::endl;
+}
+
+Server::~Server()
+{
+	for (std::vector<struct pollfd>::iterator it = _fds.begin(); it != _fds.end(); ++it)
+	{
+		// iterator behaves like a pointer
+		if (it->fd != -1)
+			close(it->fd);
+	}
+
+		std::cout << "Server is closed. Bye 👋" << std::endl;
 }
