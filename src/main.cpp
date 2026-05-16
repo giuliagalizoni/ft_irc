@@ -7,6 +7,21 @@
 #include <string>
 #include <cstring>
 
+#include "../includes/Server.hpp"
+
+int main(int argc, char **argv)
+{
+	if (argc != 3)
+	{
+		return 1; // TODO: exception
+	}
+
+	// TODO: parse function
+	Server server(std::stoi(argv[1]), argv[2]);
+	server.run();
+}
+// FOR REFERENCE
+/*
 int	main()
 {
 	int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0); // creating an IPv4 TCP socket with non-blocking mode
@@ -95,3 +110,4 @@ int	main()
 		}
 	}
 }
+*/
