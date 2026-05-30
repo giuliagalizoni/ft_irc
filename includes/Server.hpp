@@ -1,26 +1,24 @@
 #ifndef SERVER_HPP
 # define SERVER_HPP
 
-// # include "User.hpp"
-// # include "Channel.hpp"
+# include "User.hpp"
+# include "Channel.hpp"
 
 # include <string>
 # include <vector>
 # include <map>
 # include <poll.h>
 
-class User; // temp solution
-
 class Server
 {
 	private:
 	int _port; // port received from argv
-	std::string _password; // password received from argv
+	const std::string _password; // password received from argv
 	int _serverFd; // listening socket
 
 	std::vector<struct pollfd> _fds; // poll fds - should include server + users
 	std::map<int, User*> _users; // map fd:user
-	// std::map<std::string, Channel> _channels; // map name:channel
+	std::map<std::string, Channel> _channels; // map name:channel
 
 	// Orthodox Canonical Form; private so it's unaccessible
 	Server();
