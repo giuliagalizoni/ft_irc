@@ -4,7 +4,7 @@ NAME     = ircserv
 
 SRC_DIR  = src
 OBJ_DIR  = obj
-SRCS     = main.cpp Server.cpp
+SRCS     = main.cpp Server.cpp User.cpp
 
 SRC_FILES = $(addprefix $(SRC_DIR)/, $(SRCS))
 OBJS     = $(addprefix $(OBJ_DIR)/, $(SRCS:.cpp=.o))
