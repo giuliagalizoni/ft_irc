@@ -2,7 +2,7 @@
 # define SERVER_HPP
 
 # include "User.hpp"
-# include "Channel.hpp"
+// # include "Channel.hpp"
 
 # include <string>
 # include <vector>
@@ -18,7 +18,7 @@ class Server
 
 	std::vector<struct pollfd> _fds; // poll fds - should include server + users
 	std::map<int, User*> _users; // map fd:user
-	std::map<std::string, Channel> _channels; // map name:channel
+	// std::map<std::string, Channel> _channels; // map name:channel
 
 	// Orthodox Canonical Form; private so it's unaccessible
 	Server();
@@ -26,12 +26,12 @@ class Server
 	Server&	operator=(const Server& other);
 
 	// helper functions to run()
-	void _accpetClient(); // accept part
-	void _handleClient(int fd); // recv part
+	void _acceptClient(); // accept part
+	bool _handleClient(int fd); // recv part
 
 	public:
 
-	Server(int port, std::string password);
+	Server(int port, const std::string& password);
 	~Server();
 	void run(); // main function; where poll loop lives
 

@@ -40,7 +40,7 @@ void User::sendMessage(const std::string& msg)
 {
 	ssize_t bytesSent =  0;
 
-	while (bytesSent < msg.size())
+	while (bytesSent < (ssize_t)msg.size())
 	{
 		ssize_t result = send(_fd, msg.c_str() + bytesSent, msg.size() - bytesSent, 0);
 		if (result == -1)

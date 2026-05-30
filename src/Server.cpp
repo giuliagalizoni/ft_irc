@@ -6,9 +6,11 @@
 #include <unistd.h>
 #include <cstring>
 
+static const int BUFFER_SIZE = 512;
+
 
 // TODO: break this logic into helpers
-Server::Server(int port, const std::string password) : _port(port), _password(password)
+Server::Server(int port, const std::string& password) : _port(port), _password(password)
 {
 	// TODO: port should be already validated
 	// create listening IPv4 TCP socket with non-blocking mode
@@ -66,9 +68,33 @@ Server::~Server()
 			close(it->fd);
 	}
 
-	// TODO: delete all users
+	// delete all users
+	for (std::map<int, User*>::iterator it = _users.begin(); it != _users.end(); ++it)
+		delete it->second; // iterators for maps have first and second
 
-	std::cout << "Server is closed. Bye 👋" << std::endl;
+	std::cout << "Server is closed, all Users are deleted. Bye 👋" << std::endl;
+}
+
+void Server::_acceptClient()
+{
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	socklen_t addrlen = sizeof(addr);
+
+	pollfd client;
+	client.fd = accept4(_serverFd, (struct sockaddr*)&addr, &addrlen, SOCK_NONBLOCK);
+	client.events = POLLIN; // tell poll to watch this fd for incoming data
+	client.revents = 0; // initialize the returned events field to zero, so it won't be mistakenly processed in the current poll iteration before poll has checked it
+	// TODO: implement exception
+	if (client.fd == -1)
+	{
+		std::cerr << "accept4 failed" << std::endl;
+		return;
+	}
+	_fds.push_back(client);
+	_users[client.fd] = new User(client.fd, inet_ntoa(addr.sin_addr));
+
+	std::cout << "client connected" << std::endl;
 }
 
 void Server::run()
@@ -76,40 +102,55 @@ void Server::run()
 	// poll
 	while (1)
 	{
-		poll(&_fds[0], _fds.size(), -1);
-
-		for (std::vector<struct pollfd>::iterator it = _fds.begin(); it != _fds.end(); ++it)
+		if (poll(&_fds[0], _fds.size(), -1) == -1)
 		{
-			if (!(it->revents & POLLIN)) // if there's nothing to read, go to next iteration
+			std::cerr << "poll error" << std::endl;
+			continue; // TODO: implement exception
+		}
+		for (size_t i = 0; i < _fds.size(); i++)
+		{
+			if (!(_fds[i].revents & POLLIN))
 				continue;
-
-			// case it's server
-			if (it->fd == _serverFd)
-			{
-				// accept client
-
-				struct sockaddr_in addr;
-				memset(&addr, 0, sizeof(addr));
-				socklen_t addrlen = sizeof(addr);
-
-				pollfd client;
-				client.fd = accept4(_serverFd, (struct sockaddr*)&addr, &addrlen, SOCK_NONBLOCK); // accept new client in non-blocking mode
-				client.events = POLLIN;
-				_fds.push_back(client);
-				_users[client.fd] = new User(client.fd, inet_ntoa(addr.sin_addr)); // fd + hostname
-
-				std::cout << "client connected" << std::endl;
-			}
+			if (_fds[i].fd == _serverFd)
+				_acceptClient();
 			else
 			{
-				_handleClient(it->fd);
+				if (_handleClient(_fds[i].fd))
+				{
+					_fds.erase(_fds.begin() + i);
+					i--;
+				}
 			}
-
-			// case it's client
-				// handle client
-
 		}
+	}
+}
+
+bool Server::_handleClient(int fd)
+{
+	char buffer[BUFFER_SIZE];
+	memset(buffer, 0, BUFFER_SIZE);
+
+	ssize_t bytes = recv(fd, buffer, sizeof(buffer), 0); // read data from socket into buffer
+	// TODO: implement exceptions
+	if (bytes == 0) // in case recv fails
+	{
+		close(fd);
+		delete _users[fd];
+		_users.erase(fd);
+		if (bytes == 0)
+			std::cout << "client disconnected" << std::endl;
+		else if (bytes == -1)
+			std::cerr << "recv failed" << std::endl; // TODO exception
+		return true;
+	}
+	else // in case it works
+	{
+		std::string line;
+
+		_users[fd]->appendToBuffer(std::string(buffer, bytes));
+		while (_users[fd]->getNextLine(line))
+			std::cout << line << std::endl;
+		return false;
 
 	}
-
 }
