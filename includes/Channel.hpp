@@ -73,7 +73,7 @@ class Channel
         bool canJoin(User* user, const std::string& key) const;
         bool canChangeTopic(User* user) const;
 
-        const std::set<User*>& getUsers() const;    // to broadcast messages to all users
+        const std::set<User*>& getUsers() const;    
 };
 
 #endif
