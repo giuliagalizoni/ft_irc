@@ -22,3 +22,42 @@ nc localhost 6667
 ```
 Then type a message and hit enter — you should see it echoed in the server terminal and receive `Hello client` back.
 
+## Command processing
+- Generic command parser implemented
+- Commands currently implemented: PASS, NICK, USER, JOIN, PRIVMSG
+
+## Registration
+- Password validation against server password
+- Registration completed wehn PASS+NICK+USER have been recieved
+- Registration announcement triggered only once
+
+## Channels
+- Channel creation on first JOIN
+- Operator assigned to first user joining the channel
+- JOIN notifications broadcasted to all channel members
+
+## Messaging
+- Channel messages: PRIVMSG #channel :message
+- Direct messages: PRIVMSG nickname :message
+- Sender excluded from broadcast
+- Nickname uniqueness validation implemented
+
+## How to run
+./ircserv 6667 pass
+
+In another terminal: nc -C localhost 6667
+
+## Tests
+Registration
+    PASS pass
+    NICK charlie
+    USER charlie 0 * : Charles Chaplin
+
+Channel join
+    JOIN #test
+
+Channel message
+    PRIVMSG #test :hello everyone
+
+Direct message
+    PRIVMSG Bob :hello privately

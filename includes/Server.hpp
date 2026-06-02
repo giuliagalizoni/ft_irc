@@ -3,6 +3,7 @@
 
 # include "User.hpp"
 # include "Channel.hpp"
+# include "Command.hpp"
 
 # include <string>
 # include <vector>
@@ -29,11 +30,27 @@ class Server
 		void _acceptClient(); // accept part
 		bool _handleClient(int fd); // recv part
 
+		void _processCommand(int fd, const std::string& line);
+		void _handleJoin(int fd, const Command& cmd);
+		void _handleNick(int fd, const Command& cmd);
+		void _broadcastToChannel(Channel& channel, const std::string& msg, int exceptFd);
+
+		Command _parseCommand(const std::string& line);
+
+		void _handlePass(int fd, const Command& cmd);
+		void _handleUser(int fd, const Command& cmd);
+
+		void _checkRegistration(int fd);
+
+		bool _nicknameExists(const std::string& nickname, int exceptFd) const;
+
+		void _handlePrivmsg(int fd, const Command& cmd);
+		User* _findUserByNickname(const std::string& nickname) const;
+
 	public:
 		Server(int port, const std::string& password);
 		~Server();
 		void run(); // main function; where poll loop lives
-
 };
 
 #endif
