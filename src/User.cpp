@@ -5,14 +5,24 @@
 #include <sys/socket.h>
 
 
-User::User(int fd, const std::string& hostname): _fd(fd), _hostname(hostname)
+User::User(int fd, const std::string& hostname)
+	: 	_fd(fd), 
+		_buffer(""),
+		_hostname(hostname),
+		_nickname(""),
+		_username(""),
+		_realname(""),
+		_passReceived(false),
+		_nickReceived(false),
+		_userReceived(false),
+		_registrationAnnounced(false)
 {
-	std::cout << "User " << _fd << "created" << std::endl;
+	std::cout << "User " << _fd << " created" << std::endl;
 }
 
 User::~User()
 {
-	std::cout << "User " << _fd << "deleted" << std::endl;
+	std::cout << "User " << _fd << " deleted" << std::endl;
 }
 
 // appends raw bytes to _buffer
@@ -102,3 +112,31 @@ void User::setUserReceived()
 {
 	_userReceived = true;
 }
+
+void User::setNickname(const std::string& nickname)
+{
+	_nickname = nickname;
+	setNickReceived();
+}
+
+void User::setUsername(const std::string& username)
+{
+	_username = username;
+	setUserReceived();
+}
+
+void User::setRealname(const std::string& realname)
+{
+	_realname = realname;
+}
+
+bool User::isRegistrationAnnounced()
+{
+	return (_registrationAnnounced);
+}
+
+void User::setRegistrationAnnounced()
+{
+	_registrationAnnounced = true;
+}
+
