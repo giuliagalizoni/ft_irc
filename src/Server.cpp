@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
+#include <cctype>
 
 static const int BUFFER_SIZE = 512;
 
@@ -159,13 +160,11 @@ bool Server::_handleClient(int fd)
 	}
 }
 
-void Server::_processCommand(int fd, const std::string& line)
+void Server::_processCommand(int fd, std::string& line)
 {
 	Command cmd = _parseCommand(line);
 	if (cmd.command.empty())
 		return ;
-
-	std::cout << "command: " << line << std::endl;
 
 	if (cmd.command == "NICK")
 		_handleNick(fd, cmd);
@@ -179,7 +178,7 @@ void Server::_processCommand(int fd, const std::string& line)
 		_handlePrivmsg(fd, cmd);
 
 	// still more commands to come
-	
+
 	else
 	{
 		std::cout << "Unknown command: " << cmd.command << std::endl;
@@ -190,10 +189,10 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 {
 	if (cmd.params.empty())
 		return ;
-	
+
 	User* user = _users[fd];		//just a pointer to that particular client
 
-	std::string channelName = cmd.params[0];		
+	std::string channelName = cmd.params[0];
 
 	if (channelName[0] != '#')
 		channelName = "#" + channelName;
@@ -201,7 +200,7 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 	if (_channels.find(channelName) == _channels.end())		//_channels.end() means it didnt find any in the iteration
 		_channels[channelName] = Channel(channelName);		// creates the Channel object and store it under channelName
 
-	Channel& channel = _channels[channelName];				// just a reference to the channelName object	
+	Channel& channel = _channels[channelName];				// just a reference to the channelName object
 
 	if (channel.addUser(user, ""))// "" key as placeholder
 	{
@@ -256,44 +255,53 @@ void Server::_broadcastToChannel(Channel& channel, const std::string& msg, int e
 	}
 }
 
-Command Server::_parseCommand(const std::string& line)
+Command Server::_parseCommand(std::string& line)
 {
 	Command cmd;
-	std::string current;
-	size_t i = 0;
 
-	while (i < line.size() && line[i] == ' ')
-		i++;
-
-	while (i < line.size())
-	{
-		if (line[i] == ' ')
-		{
-			if(!current.empty())
-			{
-				cmd.params.push_back(current);
-				current.clear();
-			}	
-			while (i < line.size() && line[i] == ' ')		//spaces between command and parameter
-				i++;
-		}
-		else
-		{
-			current = current + line[i];
-			i++;
-		}
-	}
-
-	if (!current.empty())
-		cmd.params.push_back(current);			//the last param has not been pushed, because end of size was found before empty space, therefor pushed here
-
-	if (!cmd.params.empty())
-	{
-		cmd.command = cmd.params[0];			// the first parsed param is the command
-		cmd.params.erase(cmd.params.begin());
-	}
+	getCommand(cmd, line);
+	getParams(cmd,line);
 
 	return (cmd);
+}
+
+void Server::getCommand(Command& cmd, std::string& line)
+{
+	std::size_t found = line.find(" "); // find the first space
+	if (found != std::string::npos) // if there's a space
+	{
+		cmd.command = line.substr(0, found); // extract the command up to the space
+		line.erase(0, found + 1); // clean the extracted part from line
+	}
+	else // no space
+		cmd.command = line; // take all the line
+
+	for(size_t i = 0; i < cmd.command.size(); i++) // covert it to upper case to be sure
+		 cmd.command[i] = toupper(cmd.command[i]);
+}
+
+void Server::getParams(Command& cmd, std::string& line)
+{
+	while(!line.empty()) // while there's still something remaining in line
+	{
+		if (line[0] == ':') // if it's starts with :
+		{
+			cmd.params.push_back(line.substr(1)); // add everything from after the :
+			break; // and exit the loop
+		}
+		std::size_t found = line.find(" "); // find the next space
+		if (found != std::string::npos) // it there's one
+		{
+			if (found != 0)
+				cmd.params.push_back(line.substr(0, found)); // push everything up to the space to params vector
+			line.erase(0, found + 1); // clean the extracted part
+		}
+		else // if there's no space and line is not empty, it's the last parameter
+		{
+			cmd.params.push_back(line); // push everything in line
+			break; // exit the loop
+		}
+	}
 }
 
 void Server::_handlePass(int fd, const Command& cmd)
@@ -326,12 +334,6 @@ void Server::_handleUser(int fd, const Command& cmd)	// USER charlie 0 * :Charli
 	user->setUsername(cmd.params[0]);
 
 	std::string realname = cmd.params[3];
-	if (!realname.empty() && realname[0] == ':')		//because the colon is attached to the first part of the realname
-		realname.erase(0, 1);
-
-	for (size_t i = 4; i < cmd.params.size(); ++i)		// append all the surnames after the first part of the realname
-		realname = realname + " " + cmd.params[i];
-
 	user->setRealname(realname);
 	user->setUserReceived();
 
@@ -350,7 +352,7 @@ void Server::_checkRegistration(int fd)
 	if (user->isRegistered() && !user->isRegistrationAnnounced())
 	{
 		user->setRegistrationAnnounced();
-		
+
 		std::cout << user->getNickname() << " registered" << std::endl;
 	}
 }
@@ -377,12 +379,6 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUse
 
 	std::string target = cmd.params[0];
 	std::string msg = cmd.params[1];	//but actually is from 3 on...
-
-	if (!msg.empty() && msg[0] == ':')		//because the colon is attached to the first part of the msg
-		msg.erase(0, 1);
-
-	for (size_t i = 2; i < cmd.params.size(); ++i)		// append all the surnames after the first part of the realname
-		msg = msg + " " + cmd.params[i];
 
 	if (target[0] == '#')
 	{

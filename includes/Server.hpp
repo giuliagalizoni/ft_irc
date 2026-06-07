@@ -30,12 +30,14 @@ class Server
 		void _acceptClient(); // accept part
 		bool _handleClient(int fd); // recv part
 
-		void _processCommand(int fd, const std::string& line);
+		void _processCommand(int fd, std::string& line);
 		void _handleJoin(int fd, const Command& cmd);
 		void _handleNick(int fd, const Command& cmd);
 		void _broadcastToChannel(Channel& channel, const std::string& msg, int exceptFd);
 
-		Command _parseCommand(const std::string& line);
+		Command _parseCommand(std::string& line);
+		void getCommand(Command& cmd, std::string& line);
+		void getParams(Command& cmd, std::string& line);
 
 		void _handlePass(int fd, const Command& cmd);
 		void _handleUser(int fd, const Command& cmd);

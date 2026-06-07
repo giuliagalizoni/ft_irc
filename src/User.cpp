@@ -6,7 +6,7 @@
 
 
 User::User(int fd, const std::string& hostname)
-	: 	_fd(fd), 
+	: 	_fd(fd),
 		_buffer(""),
 		_hostname(hostname),
 		_nickname(""),
@@ -34,14 +34,16 @@ void User::appendToBuffer(const std::string& data)
 // extracts one `\r\n`-terminated line from `_buffer`, returns false if none available
 bool User::getNextLine(std::string& line)
 {
-	std::size_t found = _buffer.find("\r\n");
+	std::size_t found = _buffer.find("\n");
 
 	if (found == std::string::npos)
 		return false;
 	else
 	{
 		line = _buffer.substr(0, found);
-		_buffer.erase(0, found + 2);
+		_buffer.erase(0, found + 1);
+		if (!line.empty() && line[line.size() - 1] == '\r')
+			line.erase(line.end() - 1, line.end());
 		return true;
 	}
 }
