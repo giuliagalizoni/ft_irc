@@ -1,4 +1,5 @@
 #include "../includes/Server.hpp"
+#include "../includes/SetupException.hpp"
 
 #include <iostream>
 #include <netinet/in.h>
@@ -17,18 +18,13 @@ Server::Server(int port, const std::string& password) : _port(port), _password(p
 	// create listening IPv4 TCP socket with non-blocking mode
 	_serverFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
 	if (_serverFd == -1)
-	{
-		close(_serverFd);
-		std::cerr << "Couldn't creat socket" << std::endl;
-		//TODO:replace with exception
-	}
+		throw SetupException("Socket failed; couldn't create Server FD");
 
 	int opt = 1;
 	if (setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)  // allow the address/port to be reused sooner
 	{
 		close(_serverFd);
-		std::cerr << "setsockopt failed" << std::endl;
-		// TODO: exception;
+		throw SetupException("setsockopt failed");
 	}
 	// binding socket
 	struct sockaddr_in addr; // IPv4 socket address structure
@@ -40,15 +36,13 @@ Server::Server(int port, const std::string& password) : _port(port), _password(p
 	if (bind(_serverFd, (struct sockaddr*)&addr, sizeof(addr)) == -1) // bind socket to address
 	{
 		close(_serverFd);
-		std::cerr << "bind failed" << std::endl;
-		// TODO: exception;
+		throw SetupException("bind failed");
 	}
 
 	if (listen(_serverFd, SOMAXCONN) == -1)// mark the socket as passive (waiting for connections)
 	{
 		close(_serverFd);
-		std::cerr << "listen failed" << std::endl;
-		// TODO: exception;
+		throw SetupException("listen failed");
 	}
 
 	pollfd server_fd;

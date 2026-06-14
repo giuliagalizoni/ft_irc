@@ -1,5 +1,4 @@
 #include <sys/socket.h> // socket()
-
 #include <iostream>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -7,21 +6,31 @@
 #include <string>
 #include <cstring>
 
-#include <cstdlib> // TODO: remove
+#include <cstdlib> // for atoi; might remove in the future
 
 #include "../includes/Server.hpp"
+#include "../includes/SetupException.hpp"
 
 int main(int argc, char **argv)
 {
 	if (argc != 3)
 	{
-		std::cout << "Usage: ./ircserv <port> <password>" << std::endl;
-		return 1; // TODO: exception
+		std::cerr << "Usage: ./ircserv <port> <password>" << std::endl;
+		return 1;
 	}
 
 	// TODO: parsing function
-	Server server(std::atoi(argv[1]), argv[2]);
-	server.run();
+	try
+	{
+		Server server(std::atoi(argv[1]), argv[2]);
+		server.run();
+	}
+	catch (const std::exception& e)
+	{
+		std::cerr << "Exception caught: " << e.what() << std::endl;
+		return 1;
+	}
+	return 0;
 }
 // FOR REFERENCE
 /*
