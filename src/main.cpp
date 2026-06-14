@@ -5,11 +5,29 @@
 #include <poll.h>
 #include <string>
 #include <cstring>
+#include <sstream>
 
 #include <cstdlib> // for atoi; might remove in the future
 
 #include "../includes/Server.hpp"
 #include "../includes/SetupException.hpp"
+
+int validPort(char *str)
+{
+	if (str[0] == '+')
+		return -1;
+
+	std::istringstream iss(str);
+	long port;
+	iss >> port;
+
+	if (iss.fail() || !iss.eof())
+		return -1;
+	if (port <= 0 || port > 65535)
+			return -1;
+
+	return port;
+}
 
 int main(int argc, char **argv)
 {
@@ -19,10 +37,16 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	// TODO: parsing function
+	int port = validPort(argv[1]);
+	if (port < 0)
+	{
+		std::cerr << "Invalid port" << std::endl;
+		return 1;
+	}
+
 	try
 	{
-		Server server(std::atoi(argv[1]), argv[2]);
+		Server server(port, argv[2]);
 		server.run();
 	}
 	catch (const std::exception& e)
