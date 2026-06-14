@@ -1,16 +1,9 @@
-#include <sys/socket.h> // socket()
 #include <iostream>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <poll.h>
 #include <string>
-#include <cstring>
 #include <sstream>
-
-#include <cstdlib> // for atoi; might remove in the future
+#include <cctype>
 
 #include "../includes/Server.hpp"
-#include "../includes/SetupException.hpp"
 
 int validPort(char *str)
 {
@@ -29,6 +22,20 @@ int validPort(char *str)
 	return port;
 }
 
+bool validPass(const std::string& pass)
+{
+	if (pass.empty())
+		return false;
+	for (std::string::size_type i = 0; i < pass.size(); i++)
+	{
+		if (isspace(static_cast<unsigned char>(pass[i])))
+			return false;
+		if (iscntrl(static_cast<unsigned char>(pass[i])))
+			return false;
+	}
+	return true;
+}
+
 int main(int argc, char **argv)
 {
 	if (argc != 3)
@@ -41,6 +48,12 @@ int main(int argc, char **argv)
 	if (port < 0)
 	{
 		std::cerr << "Invalid port" << std::endl;
+		return 1;
+	}
+
+	if (!validPass(argv[2]))
+	{
+		std::cerr << "Invalid password" << std::endl;
 		return 1;
 	}
 
