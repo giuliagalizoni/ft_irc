@@ -1,4 +1,5 @@
 #include "../includes/Server.hpp"
+#include "../includes/SetupException.hpp"
 
 #include <iostream>
 #include <netinet/in.h>
@@ -13,22 +14,16 @@ static const int BUFFER_SIZE = 512;
 // TODO: break this logic into helpers
 Server::Server(int port, const std::string& password) : _port(port), _password(password)
 {
-	// TODO: port should be already validated
 	// create listening IPv4 TCP socket with non-blocking mode
 	_serverFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
 	if (_serverFd == -1)
-	{
-		close(_serverFd);
-		std::cerr << "Couldn't creat socket" << std::endl;
-		//TODO:replace with exception
-	}
+		throw SetupException("Socket failed; couldn't create Server FD");
 
 	int opt = 1;
 	if (setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)  // allow the address/port to be reused sooner
 	{
 		close(_serverFd);
-		std::cerr << "setsockopt failed" << std::endl;
-		// TODO: exception;
+		throw SetupException("setsockopt failed");
 	}
 	// binding socket
 	struct sockaddr_in addr; // IPv4 socket address structure
@@ -40,15 +35,13 @@ Server::Server(int port, const std::string& password) : _port(port), _password(p
 	if (bind(_serverFd, (struct sockaddr*)&addr, sizeof(addr)) == -1) // bind socket to address
 	{
 		close(_serverFd);
-		std::cerr << "bind failed" << std::endl;
-		// TODO: exception;
+		throw SetupException("bind failed");
 	}
 
 	if (listen(_serverFd, SOMAXCONN) == -1)// mark the socket as passive (waiting for connections)
 	{
 		close(_serverFd);
-		std::cerr << "listen failed" << std::endl;
-		// TODO: exception;
+		throw SetupException("listen failed");
 	}
 
 	pollfd server_fd;
@@ -86,7 +79,6 @@ void Server::_acceptClient()
 	client.fd = accept4(_serverFd, (struct sockaddr*)&addr, &addrlen, SOCK_NONBLOCK);
 	client.events = POLLIN; // tell poll to watch this fd for incoming data
 	client.revents = 0; // initialize the returned events field to zero, so it won't be mistakenly processed in the current poll iteration before poll has checked it
-	// TODO: implement exception
 	if (client.fd == -1)
 	{
 		std::cerr << "accept4 failed" << std::endl;
@@ -106,11 +98,12 @@ void Server::run()
 		if (poll(&_fds[0], _fds.size(), -1) == -1)
 		{
 			std::cerr << "poll error" << std::endl;
-			continue; // TODO: implement exception
+			break;
 		}
 		for (size_t i = 0; i < _fds.size(); i++)
 		{
-			if (!(_fds[i].revents & POLLIN))
+			short ready = _fds[i].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL);
+			if (!ready)
 				continue;
 			if (_fds[i].fd == _serverFd)
 				_acceptClient();
@@ -131,33 +124,31 @@ bool Server::_handleClient(int fd)
 	char buffer[BUFFER_SIZE];
 	memset(buffer, 0, BUFFER_SIZE);
 
+	std::map<int, User*>::iterator it = _users.find(fd);
+	if (it == _users.end())
+		return false;
 	ssize_t bytes = recv(fd, buffer, sizeof(buffer), 0); // read data from socket into buffer
-	// TODO: implement exceptions
 	if (bytes <= 0) // in case recv fails . recv() can return -1 too, so bytes <= 0
 	{
+		delete it->second; // free the User*  (->second is the value)
+		_users.erase(it); // remove the map entry
 		close(fd);
-		delete _users[fd];
-		_users.erase(fd);
-		if (bytes == 0)
-			std::cout << "client disconnected" << std::endl;
-		else if (bytes == -1)
-			std::cerr << "recv failed" << std::endl; // TODO exception
+		std::cout << "client disconnected" << std::endl;
 		return true;
 	}
 	else // in case it works
 	{
 		std::string line;
+		User* user = it->second;
 
-		_users[fd]->appendToBuffer(std::string(buffer, bytes));
-		while (_users[fd]->getNextLine(line))
+		user->appendToBuffer(std::string(buffer, bytes));
+		while (user->getNextLine(line))
 		{
 			//std::cout << line << std::endl;.... in order to generalise it:
 			_processCommand(fd, line);
 		}
-
-		return false;
-
 	}
+	return false;
 }
 
 void Server::_processCommand(int fd, std::string& line)
