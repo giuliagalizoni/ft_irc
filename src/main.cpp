@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 #include <cctype>
+#include <exception>
 
 #include "../includes/Server.hpp"
 
@@ -9,7 +10,7 @@ int validPort(char *str)
 {
 	if (str[0] == '+')
 		return -1;
-
+	// TODO: check leading spaces
 	std::istringstream iss(str);
 	long port;
 	iss >> port;
