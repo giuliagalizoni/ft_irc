@@ -145,17 +145,18 @@ bool Server::_handleClient(int fd)
 		while (user->getNextLine(line))
 		{
 			//std::cout << line << std::endl;.... in order to generalise it:
-			_processCommand(fd, line);
+			if (_processCommand(fd, line))		//conditional for checking if user QUITTED
+				return (true);
 		}
 	}
 	return false;
 }
 
-void Server::_processCommand(int fd, std::string& line)
+bool Server::_processCommand(int fd, std::string& line)
 {
 	Command cmd = _parseCommand(line);
 	if (cmd.command.empty())
-		return ;
+		return (false);
 
 	if (cmd.command == "NICK")
 		_handleNick(fd, cmd);
@@ -167,6 +168,16 @@ void Server::_processCommand(int fd, std::string& line)
 		_handleUser(fd, cmd);
 	else if (cmd.command == "PRIVMSG")
 		_handlePrivmsg(fd, cmd);
+	else if (cmd.command == "PART")
+		_handlePart(fd, cmd);
+	else if (cmd.command == "QUIT")
+		_handleQuit(fd, cmd);
+	else if (cmd.command == "TOPIC")
+		_handleTopic(fd, cmd);
+	else if (cmd.command == "INVITE")
+		_handleInvite(fd, cmd);
+	else if (cmd.command == "KICK")
+		_handleKick(fd, cmd);
 
 	// still more commands to come
 
@@ -174,6 +185,7 @@ void Server::_processCommand(int fd, std::string& line)
 	{
 		std::cout << "Unknown command: " << cmd.command << std::endl;
 	}
+	return (false);
 }
 
 void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text ending with \r\n
@@ -414,4 +426,232 @@ User* Server::_findUserByNickname(const std::string& nickname) const
 			return (it->second);
 	}
 	return (NULL);
+}
+
+void Server::_handlePart(int fd, const Command& cmd)
+{
+	if (cmd.params.empty())
+	{
+		std::cout << "PART: not enough parameters" << std::endl;
+		return ;
+	}
+
+	User* user = _users[fd];
+	std::string channelName = cmd.params[0];
+
+	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
+	if (it == _channels.end())
+	{
+		std::cout << "PART: no such channel " << channelName << std::endl;
+		return ;
+	}
+
+	Channel& channel = it->second;
+
+	if (!channel.hasUser(user))
+	{
+		std::cout << "PART: user is not in channel " << channelName << std::endl;
+		return ;
+	}
+
+	std::string msg = ":" + user->getNickname()
+					+ " PART "
+					+ channelName
+					+ "\r\n";
+
+	_broadcastToChannel(channel, msg, -1);
+
+	channel.removeUser(user);
+
+	std::cout << user->getNickname()
+				<< " left "
+				<< channelName
+				<< std::endl;
+	
+	if (channel.getUsers().empty())
+		_channels.erase(channelName);
+}
+
+bool Server::_handleQuit(int fd, const Command& cmd)
+{
+	User* user = _users[fd];
+
+	std::string reason = "Client quit";
+	if (!cmd.params.empty())
+		reason = cmd.params[0];
+
+	std::string msg = ":" + user->getNickname()
+					+ " QUIT :"
+					+ reason
+					+ "\r\n";
+
+	for (std::map<std::string, Channel>::iterator it = _channels.begin(); it != _channels.end(); )
+	{
+		Channel& channel = it->second;
+
+		if (channel.hasUser(user))
+		{
+			_broadcastToChannel(channel, msg, fd);
+			channel.removeUser(user);
+		}
+
+		if (channel.getUsers().empty())
+			_channels.erase(it++);		// the user can be in several channels
+		else
+			++it;
+	}
+
+	close(fd);
+	delete _users[fd];
+	_users.erase(fd);
+
+	return (true);
+}
+
+void Server::_handleTopic(int fd, const Command& cmd)
+{
+	if (cmd.params.empty())
+	{
+		std::cout << "TOPIC: not enough parameters" << std::endl;
+		return ;
+	}
+
+	User* user = _users[fd];
+	std::string channelName = cmd.params[0];
+
+	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
+	if (it == _channels.end())
+	{
+		std::cout << "TOPIC: no such channel " << channelName << std::endl;
+		return ;
+	}
+
+	Channel& channel = it->second;
+
+	if (cmd.params.size() == 1)
+	{
+		std::cout << "Current topic for " << channelName << ": " << channel.getTopic() << std::endl;
+		return ;
+	}
+
+	if (!channel.canChangeTopic(user))
+	{
+		std::cout << "TOPIC: user cannot change topic" << std::endl;
+		return ;
+	}
+
+	std::string topic = cmd.params[1];
+	channel.setTopic(topic);
+
+	std::string msg = ":" + user->getNickname() + " TOPIC " + channelName + " :" + topic + "\r\n";
+
+	_broadcastToChannel(channel, msg, -1);
+}
+
+void Server::_handleInvite(int fd, const Command& cmd)
+{
+	if (cmd.params.size() < 2)
+	{
+		std::cout << "INVITE: not enough parameters" << std::endl;
+		return ;
+	}
+
+	User* inviter = _users[fd];
+
+	std::string targetNick = cmd.params[0];
+	std::string channelName = cmd.params[1];
+
+	User* invitedUser = _findUserByNickname(targetNick);
+	if (!invitedUser)
+	{
+		std::cout << "INVITE: no such nick " << targetNick << std::endl;
+		return ;
+	}
+
+	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
+	if (it == _channels.end())
+	{
+		std::cout << "INVITE: no such channel " << channelName << std::endl;
+		return ;
+	}
+
+	Channel& channel = it->second;
+
+	if (!channel.hasUser(inviter))
+	{
+		std::cout << "INVITE: inviter is not in the channel " << channelName << std::endl;
+		return ;
+	}
+	if (!channel.isOperator(inviter))
+	{
+		std::cout << "INVITE: inviter is not operator" << std::endl;
+		return ;
+	}
+	if (channel.hasUser(invitedUser))
+	{
+		std::cout << "INVITE: user already in channel " << channelName << std::endl;
+		return ;
+	}
+
+	channel.inviteUser(invitedUser);
+
+	std::string msg = ":" + inviter->getNickname() + " INVITE " + invitedUser->getNickname() + " " + channelName + "\r\n";
+
+	invitedUser->sendMessage(msg);
+
+	std::cout << inviter->getNickname() << " invited " << invitedUser->getNickname() << " to " << channelName << std::endl;
+}
+
+void Server::_handleKick(int fd, const Command& cmd)
+{
+	if (cmd.params.size() < 2)
+	{
+		std::cout << "KICK: not enough parameters" << std::endl;
+		return ;
+	}
+
+	User* kicker = _users[fd];
+
+	std::string channelName = cmd.params[0];
+	std::string targetNick = cmd.params[1];
+
+	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
+	if (it == _channels.end())
+	{
+		std::cout << "KICK: no such channel" << std::endl;
+	}
+
+	Channel& channel = it->second;
+
+	if (!channel.hasUser(kicker))
+	{
+		std::cout << "KICK: kicker is not in the channel " << channelName << std::endl;
+		return ;
+	}
+	if (!channel.isOperator(kicker))
+	{
+		std::cout << "KICK: kicker is not operator" << std::endl;
+		return ;
+	}
+
+	User *target = _findUserByNickname(targetNick);
+	if (!target)
+	{
+		std::cout << "KICK: no such nick" << std::endl;
+		return ;
+	}
+
+	if (!channel.hasUser(target))
+	{
+		std::cout << "KICK: user not in the channel " << channelName << std::endl;
+		return ;
+	}
+
+	std::string msg = ":" + kicker->getNickname() + " KICK " + channelName + " " + targetNick + "\r\n";
+
+	_broadcastToChannel(channel, msg, -1);
+
+	channel.removeUser(target);
+
+	std::cout << kicker->getNickname() << " kicked " << targetNick << " from " << channelName << std::endl;
 }

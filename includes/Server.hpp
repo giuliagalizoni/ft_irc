@@ -30,7 +30,7 @@ class Server
 		void _acceptClient(); // accept part
 		bool _handleClient(int fd); // recv part
 
-		void _processCommand(int fd, std::string& line);
+		bool _processCommand(int fd, std::string& line);
 		void _handleJoin(int fd, const Command& cmd);
 		void _handleNick(int fd, const Command& cmd);
 		void _broadcastToChannel(Channel& channel, const std::string& msg, int exceptFd);
@@ -48,6 +48,13 @@ class Server
 
 		void _handlePrivmsg(int fd, const Command& cmd);
 		User* _findUserByNickname(const std::string& nickname) const;
+
+		void _handlePart(int fd, const Command& cmd);
+		bool _handleQuit(int fd, const Command& cmd);
+
+		void _handleTopic(int fd, const Command& cmd);
+		void _handleInvite(int fd, const Command& cmd);
+		void _handleKick(int fd, const Command& cmd);
 
 	public:
 		Server(int port, const std::string& password);
