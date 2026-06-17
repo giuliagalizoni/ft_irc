@@ -14,7 +14,7 @@
 - Generic command parser (`_parseCommand` → `getCommand` + `getParams`)
 - Parser handles the **trailing parameter** (`:`) correctly, so multi-word
   arguments arrive as one param (e.g. realname, channel message)
-- Commands implemented: PASS, NICK, USER, JOIN, PRIVMSG
+- Commands implemented: PASS, NICK, USER, JOIN, PRIVMSG, PART, TOPIC, QUIT, INVITE, KICK
 - The old `Message` struct was dropped; we kept the simpler `Command` struct
   (no `prefix` field — prefixes are only for server-to-server, which we don't do)
 
@@ -31,6 +31,10 @@
 - Channel creation on first JOIN
 - Operator assigned to first user joining the channel
 - JOIN notifications broadcast to all channel members
+- PART removes a user from a channel and deletes the channel if empty
+- TOPIC can display and update a channel topic
+- INVITE stores invited users for invite-only channel support
+- KICK removes a target user from a channel after operator validation
 
 ## Messaging
 - Channel messages: `PRIVMSG #channel :message`
@@ -80,10 +84,11 @@ replies — *not yet done, future work*).
 - **IRC protocol errors (numerics):** replace `std::cout` "errors" with real numeric
   replies (`461`, `433`, `403`, `401`, `464`, `451`, `421`) sent to the client.
 - **Registration gating:** reject commands before registration with `451`.
-- **Message prefix:** outgoing PRIVMSG/JOIN use `:nick` only; RFC form is the
+- **Message prefix:** outgoing PRIVMSG/JOIN/PART/QUIT/TOPIC/INVITE/KICK use `:nick` only; RFC form is the
   full `:nick!user@host` (affects JOIN, PART, QUIT, KICK too)
 - Remove leftover debug `std::cout` lines before submission
-- More commands: MODE, TOPIC, PART, QUIT, KICK, INVITE
+- More commands: MODE
+- Test with IRC client irssi
 
 ## How to run
 ```bash
