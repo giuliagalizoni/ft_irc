@@ -1,5 +1,6 @@
 #include "../includes/Server.hpp"
 #include "../includes/SetupException.hpp"
+#include "../includes/signals.hpp"
 
 #include <iostream>
 #include <netinet/in.h>
@@ -7,6 +8,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <cctype>
+#include <cerrno>
 
 static const int BUFFER_SIZE = 512;
 
@@ -55,9 +57,13 @@ Server::Server(int port, const std::string& password) : _port(port), _password(p
 
 Server::~Server()
 {
+	// notify clients that the server closed before closing the fds
+	for (std::map<int, User*>::iterator it = _users.begin(); it != _users.end(); ++it)
+		it->second->sendMessage("ERROR :Server is shutting down\r\n");
+
+	// closing the fds before deleting the users
 	for (std::vector<struct pollfd>::iterator it = _fds.begin(); it != _fds.end(); ++it)
 	{
-		// iterator behaves like a pointer
 		if (it->fd != -1)
 			close(it->fd);
 	}
@@ -93,12 +99,19 @@ void Server::_acceptClient()
 void Server::run()
 {
 	// poll
-	while (1)
+	while (g_running)
 	{
 		if (poll(&_fds[0], _fds.size(), -1) == -1)
 		{
-			std::cerr << "poll error" << std::endl;
-			break;
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			else
+			{
+				std::cerr << "poll error" << std::endl;
+				break;
+			}
 		}
 		for (size_t i = 0; i < _fds.size(); i++)
 		{
@@ -467,7 +480,7 @@ void Server::_handlePart(int fd, const Command& cmd)
 				<< " left "
 				<< channelName
 				<< std::endl;
-	
+
 	if (channel.getUsers().empty())
 		_channels.erase(channelName);
 }

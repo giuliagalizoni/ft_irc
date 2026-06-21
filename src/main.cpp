@@ -5,6 +5,7 @@
 #include <exception>
 
 #include "../includes/Server.hpp"
+#include "../includes/signals.hpp"
 
 int validPort(char *str)
 {
@@ -60,6 +61,7 @@ int main(int argc, char **argv)
 
 	try
 	{
+		setupSignals();
 		Server server(port, argv[2]);
 		server.run();
 	}
