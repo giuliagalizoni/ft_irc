@@ -9,7 +9,7 @@
 ## What's working
 - TCP socket bound with `INADDR_ANY`, listening; port + password taken from `argv`
 - `poll()` loop over a dynamic `std::vector<pollfd>` — handles multiple clients
-- Accepts connections with `accept4()` (non-blocking)
+- Accepts connections with `accept()`; I/O made non-blocking per-call via `MSG_DONTWAIT` on `recv`/`send` (no `fcntl`/`accept4` — not in the allowed list on Linux)
 - Reads with `recv`, buffers per-client, extracts complete lines
 
 ## Command processing
@@ -72,13 +72,26 @@ replies — *not yet done, future work*).
 - `poll() == -1`: now branches on `errno` — **`EINTR`** (signal-interrupted) `continue`s
   to re-check `g_running` (clean shutdown), any **other** errno prints once and `break`s.
   (See the signal-handling section below.)
-- `recv() <= 0`: treat as disconnect (no `errno` check) — `find(fd)` → `delete` user
-  → `erase` → `close`; `run()` removes the pollfd.
+- `recv() <= 0`: treat as disconnect (no `errno` check) — see deferred-disconnect note below.
 - `run()` now also reacts to `POLLHUP`/`POLLERR`/`POLLNVAL`, not just `POLLIN`, so
   dead/errored sockets are cleaned up instead of spinning.
 - **Verified:** valgrind across connect/disconnect cycles → `definitely lost: 0`,
   `0 errors`. The old "still reachable" on `SIGINT` is now resolved — SIGINT is caught,
   so `~Server()` runs and frees everything (see signal-handling section below).
+
+## Deferred client disconnect (latest)
+**What:** disconnects no longer happen inline. Each `User` carries a `_disconnecting`
+flag; the recv-disconnect path, `_handleQuit`, and `sendMessage` (on a real send error,
+not `EAGAIN`) now just **mark** the user. After each `poll` cycle, `run()` sweeps `_users`
+(two-pass: collect fds → then delete) and a single `_disconnectClient(fd)` owns all
+teardown: erase from `_fds`, `close`, `delete`, `erase` from `_users`.
+
+**Why:** the old code deleted a `User` deep in the call stack while the poll loop / recv
+buffer loop still held that pointer — a **use-after-free on QUIT**, plus the QUIT path
+left the closed fd in `_fds`, causing a `POLLNVAL` **CPU spin**. Centralizing teardown in
+one place, run once per cycle, removes both. `sendMessage` no longer throws/`cerr`-aborts
+on a dead client — a broken pipe drops that one client, not the server. Verified: QUIT +
+reconnect keeps the server alive at ~0% CPU, one clean `User deleted` per client.
 
 ## Signal handling & graceful shutdown (this branch)
 - New `src/signals.cpp` + `includes/signals.hpp`: a single global flag

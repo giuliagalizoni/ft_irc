@@ -83,7 +83,7 @@ void Server::_acceptClient()
 	socklen_t addrlen = sizeof(addr);
 
 	pollfd client;
-	client.fd = accept4(_serverFd, (struct sockaddr*)&addr, &addrlen, SOCK_NONBLOCK);
+	client.fd = accept(_serverFd, (struct sockaddr*)&addr, &addrlen);
 	client.events = POLLIN; // tell poll to watch this fd for incoming data
 	client.revents = 0; // initialize the returned events field to zero, so it won't be mistakenly processed in the current poll iteration before poll has checked it
 	if (client.fd == -1)
@@ -123,13 +123,21 @@ void Server::run()
 				_acceptClient();
 			else
 			{
-				if (_handleClient(_fds[i].fd))
-				{
-					_fds.erase(_fds.begin() + i);
-					i--;
-				}
+				(_handleClient(_fds[i].fd));
 			}
 		}
+		// pass 1: collect, don't touch the map
+		std::vector<int> toRemove;
+		for (std::map<int, User*>::iterator it = _users.begin(); it != _users.end(); ++it)
+		{
+			if (it->second->getDisconnecting() == true)
+			toRemove.push_back(it->second->getFd());
+		}
+
+		// pass 2: now it's safe to erase
+		for (size_t i = 0; i < toRemove.size(); ++i)
+			_disconnectClient(toRemove[i]);
+
 	}
 }
 
@@ -141,12 +149,13 @@ bool Server::_handleClient(int fd)
 	std::map<int, User*>::iterator it = _users.find(fd);
 	if (it == _users.end())
 		return false;
-	ssize_t bytes = recv(fd, buffer, sizeof(buffer), 0); // read data from socket into buffer
+	ssize_t bytes = recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT); // read data from socket into buffer
 	if (bytes <= 0) // in case recv fails . recv() can return -1 too, so bytes <= 0
 	{
-		delete it->second; // free the User*  (->second is the value)
-		_users.erase(it); // remove the map entry
-		close(fd);
+		it->second->setDisconnecting();
+		// delete it->second; // free the User*  (->second is the value)
+		// _users.erase(it); // remove the map entry
+		// close(fd);
 		std::cout << "client disconnected" << std::endl;
 		return true;
 	}
@@ -519,9 +528,10 @@ bool Server::_handleQuit(int fd, const Command& cmd)
 			++it;
 	}
 
-	close(fd);
-	delete _users[fd];
-	_users.erase(fd);
+	_users[fd]->setDisconnecting(); // setting the flag instead of deleting here
+	// close(fd);
+	// delete _users[fd];
+	// _users.erase(fd);
 
 	return (true);
 }
@@ -679,7 +689,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 	if (cmd.params.empty())
 	{
 		std::cout << "MODE: not enough parameters" << std::endl;
-		return ; 
+		return ;
 	}
 
 	User* user = _users[fd];
@@ -797,8 +807,24 @@ void Server::_handleMode(int fd, const Command& cmd)
 	std::string msg = ":" + user->getNickname() + " MODE " + channelName + " " + mode;
 	if ((flag == 'k' || flag == 'l' || flag == 'o') && cmd.params.size() >= 3)
 		msg = msg + " " + cmd.params[2];
-	
+
 	msg = msg + "\r\n";
 
 	_broadcastToChannel(channel, msg, -1);
+}
+
+void Server::_disconnectClient(int fd)
+{
+
+    for (size_t i = 0; i < _fds.size(); ++i)
+	{
+        if (_fds[i].fd == fd)
+		{
+			_fds.erase(_fds.begin() + i);
+			break;
+		}
+	}
+	close(fd);
+	delete _users[fd];
+	_users.erase(fd);
 }

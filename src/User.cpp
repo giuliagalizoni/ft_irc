@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <sys/socket.h>
+#include <cerrno>
 
 
 User::User(int fd, const std::string& hostname)
@@ -15,7 +16,8 @@ User::User(int fd, const std::string& hostname)
 		_passReceived(false),
 		_nickReceived(false),
 		_userReceived(false),
-		_registrationAnnounced(false)
+		_registrationAnnounced(false),
+		_disconnecting(false)
 {
 	std::cout << "User " << _fd << " created" << std::endl;
 }
@@ -54,17 +56,20 @@ void User::sendMessage(const std::string& msg)
 
 	while (bytesSent < (ssize_t)msg.size())
 	{
-		ssize_t result = send(_fd, msg.c_str() + bytesSent, msg.size() - bytesSent, 0);
+		ssize_t result = send(_fd, msg.c_str() + bytesSent, msg.size() - bytesSent, MSG_DONTWAIT);
 		if (result == -1)
 		{
-			std::cerr << "send error" << std::endl;
-			break;
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				break;
+			else
+			{
+				_disconnecting = true;
+				std::cerr << "send error" << std::endl;
+				break;
+			}
 		}
 		bytesSent += result;
 	}
-
-	// TODO: implememnt exceptions
-
 }
 
 
@@ -140,5 +145,15 @@ bool User::isRegistrationAnnounced()
 void User::setRegistrationAnnounced()
 {
 	_registrationAnnounced = true;
+}
+
+void User::setDisconnecting()
+{
+	_disconnecting = true;
+}
+
+bool User::getDisconnecting() const
+{
+	return _disconnecting;
 }
 

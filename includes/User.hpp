@@ -16,8 +16,9 @@ class User
 		bool _passReceived;
 		bool _nickReceived;
 		bool _userReceived;
-	
+
 		bool _registrationAnnounced; // for the case that a user has been registered, but then a nickname change shouldn't print out the new nickname is registered
+		bool _disconnecting; // to handle disconection without shutting down the server
 
 		User();
 		User(const User& other);
@@ -51,6 +52,9 @@ class User
 
 		bool isRegistrationAnnounced();
 		void setRegistrationAnnounced();
+
+		void setDisconnecting();
+		bool getDisconnecting() const;
 };
 
 #endif

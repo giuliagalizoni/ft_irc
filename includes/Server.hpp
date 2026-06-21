@@ -57,6 +57,7 @@ class Server
 		void _handleKick(int fd, const Command& cmd);
 
 		void _handleMode(int fd, const Command& cmd);
+		void _disconnectClient(int fd);
 
 	public:
 		Server(int port, const std::string& password);
