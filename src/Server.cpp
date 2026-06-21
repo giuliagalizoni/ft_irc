@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <cctype>
+#include <cstdlib> //for atoi
 
 static const int BUFFER_SIZE = 512;
 
@@ -178,8 +179,8 @@ bool Server::_processCommand(int fd, std::string& line)
 		_handleInvite(fd, cmd);
 	else if (cmd.command == "KICK")
 		_handleKick(fd, cmd);
-
-	// still more commands to come
+	else if (cmd.command == "MODE")
+		_handleMode(fd, cmd);
 
 	else
 	{
@@ -196,6 +197,10 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 	User* user = _users[fd];		//just a pointer to that particular client
 
 	std::string channelName = cmd.params[0];
+	std::string key = "";
+
+	if (cmd.params.size() >= 2)
+		key = cmd.params[1];
 
 	if (channelName[0] != '#')
 		channelName = "#" + channelName;
@@ -205,7 +210,7 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 
 	Channel& channel = _channels[channelName];				// just a reference to the channelName object
 
-	if (channel.addUser(user, ""))// "" key as placeholder
+	if (channel.addUser(user, key))
 	{
 		std::cout << _users[fd]->getNickname() << " joined " << channelName << std::endl;
 
@@ -654,4 +659,133 @@ void Server::_handleKick(int fd, const Command& cmd)
 	channel.removeUser(target);
 
 	std::cout << kicker->getNickname() << " kicked " << targetNick << " from " << channelName << std::endl;
+}
+
+void Server::_handleMode(int fd, const Command& cmd)
+{
+	if (cmd.params.empty())
+	{
+		std::cout << "MODE: not enough parameters" << std::endl;
+		return ; 
+	}
+
+	User* user = _users[fd];
+
+	std::string channelName = cmd.params[0];
+    if (channelName.empty() || channelName[0] != '#')
+    {
+        std::cout << "MODE: invalid channel" << std::endl;
+        return;
+    }
+
+	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
+	if (it == _channels.end())
+	{
+		std::cout << "MODE: no such channel" << channelName << std::endl;
+		return ;
+	}
+
+	Channel& channel = it->second;
+
+	if (cmd.params.size() == 1)
+	{
+		std::cout << "Current modes: " << channel.getModeString() << std::endl;
+		return ;
+	}
+
+	std::string mode = cmd.params[1];
+
+	if (!channel.hasUser(user))
+	{
+		std::cout << "MODE: user is not in the channel" << std::endl;
+		return ;
+	}
+
+	if (!channel.isOperator(user))
+	{
+		std::cout << "MODE: user is not operator" << std::endl;
+		return ;
+	}
+
+	if (mode.size() != 2 || (mode[0] != '+' && mode[0] != '-'))
+	{
+		std::cout << "MODE: invalid mode format" << std::endl;
+		return ;
+	}
+
+	bool adding = (mode[0] == '+');
+	char flag = mode[1];
+
+	if (flag == 'i')
+		channel.setInviteOnly(adding);
+	else if (flag == 't')
+		channel.setTopicRestricted(adding);
+	else if (flag == 'k')
+	{
+		if (adding)
+		{
+			if (cmd.params.size() < 3)
+			{
+				std::cout << "MODE +k: missing key" << std::endl;
+				return ;
+			}
+			channel.setKey(cmd.params[2]);
+		}
+		else
+			channel.removeKey();
+	}
+	else if (flag == 'l')
+	{
+		if (adding)
+		{
+			if (cmd.params.size() < 3)
+			{
+				std::cout << "MODE +l: missing limit" << std::endl;
+				return ;
+			}
+
+			size_t limit = std::atoi(cmd.params[2].c_str());
+			if (limit == 0)
+			{
+				std::cout << "MODE +l: invalid limit" << std::endl;
+				return ;
+			}
+			channel.setUserLimit(limit);
+		}
+		else
+			channel.removeUserLimit();
+	}
+	else if (flag == 'o')	//give operator privileges
+	{
+		if (cmd.params.size() < 3)
+		{
+			std::cout << "MODE +/-o: missing nick" << std::endl;
+			return ;
+		}
+
+		User* target = _findUserByNickname(cmd.params[2]);
+		if (!target || !channel.hasUser(target))
+		{
+			std::cout << "MODE +/- o: target not in channel" << std::endl;
+			return ;
+		}
+
+		if (adding)
+			channel.addOperator(target);
+		else
+			channel.removeOperator(target);
+	}
+	else
+	{
+		std::cout << "MODE: unknown mode" << flag << std::endl;
+		return ;
+	}
+
+	std::string msg = ":" + user->getNickname() + " MODE " + channelName + " " + mode;
+	if ((flag == 'k' || flag == 'l' || flag == 'o') && cmd.params.size() >= 3)
+		msg = msg + " " + cmd.params[2];
+	
+	msg = msg + "\r\n";
+
+	_broadcastToChannel(channel, msg, -1);
 }

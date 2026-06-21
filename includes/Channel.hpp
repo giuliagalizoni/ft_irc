@@ -74,6 +74,8 @@ class Channel
         bool canChangeTopic(User* user) const;
 
         const std::set<User*>& getUsers() const;    
+
+        std::string getModeString() const;
 };
 
 #endif

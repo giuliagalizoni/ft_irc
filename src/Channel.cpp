@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   Channel.cpp                                        :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: apaz-mar <apaz-mar@student.42.fr>          +#+  +:+       +#+        */
+/*   By: apaz-mar <apaz-mar@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/05/31 17:46:31 by apaz-mar          #+#    #+#             */
-/*   Updated: 2026/06/01 13:29:49 by apaz-mar         ###   ########.fr       */
+/*   Updated: 2026/06/21 16:41:19 by apaz-mar         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -188,5 +188,22 @@ const std::set<User*>& Channel::getUsers() const
     return (_users);
 }
 
+std::string Channel::getModeString() const
+{
+    std::string modes = "+";
 
+    if (_inviteOnly)
+        modes += "i";
+    if (_topicRestricted)
+        modes += "t";
+    if (_hasKey)
+        modes += "k";
+    if (_hasUserLimit)
+        modes += "l";
+
+    if (modes == "+")
+        return "";
+
+    return modes;
+}
 
