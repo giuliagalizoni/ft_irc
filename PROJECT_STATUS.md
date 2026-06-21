@@ -1,8 +1,10 @@
-**Branch:** `exceptions_handling`
+**Branch:** `giulia-signal-handling`
 
 > Branched from `giulia_safemerge` (merge of `server_dev` socket/poll infrastructure +
-> parser, and `aaron-dev` IRC command handling + channels).
-> This branch adds **error handling, exceptions, and argument validation**.
+> parser, and `aaron-dev` IRC command handling + channels), building on the
+> `exceptions_handling` work below.
+> This branch adds **signal handling and graceful shutdown** on top of the existing
+> error handling, exceptions, and argument validation.
 
 ## What's working
 - TCP socket bound with `INADDR_ANY`, listening; port + password taken from `argv`
@@ -67,20 +69,39 @@ replies — *not yet done, future work*).
 - Bad args → message to `stderr` + non-zero return (no exception — no server yet).
 
 **Phase 2 — recoverable runtime errors → no throw**
-- `poll() == -1`: print once and **`break`** out of the loop (clean shutdown via
-  destructor) instead of `continue` (which busy-looped).
+- `poll() == -1`: now branches on `errno` — **`EINTR`** (signal-interrupted) `continue`s
+  to re-check `g_running` (clean shutdown), any **other** errno prints once and `break`s.
+  (See the signal-handling section below.)
 - `recv() <= 0`: treat as disconnect (no `errno` check) — `find(fd)` → `delete` user
   → `erase` → `close`; `run()` removes the pollfd.
 - `run()` now also reacts to `POLLHUP`/`POLLERR`/`POLLNVAL`, not just `POLLIN`, so
   dead/errored sockets are cleaned up instead of spinning.
 - **Verified:** valgrind across connect/disconnect cycles → `definitely lost: 0`,
-  `0 errors`. (Remaining "still reachable" only appears when the server is
-  `SIGINT`-killed mid-run, since `~Server()` doesn't run then — see Next steps.)
+  `0 errors`. The old "still reachable" on `SIGINT` is now resolved — SIGINT is caught,
+  so `~Server()` runs and frees everything (see signal-handling section below).
+
+## Signal handling & graceful shutdown (this branch)
+- New `src/signals.cpp` + `includes/signals.hpp`: a single global flag
+  `volatile sig_atomic_t g_running` (declared `extern` in the header, defined in the
+  `.cpp`), a `static` async-signal-safe handler that only sets `g_running = 0`, and a
+  `setupSignals()` registration function.
+- Registration via `sigaction()` with `sa_flags = 0` (no `SA_RESTART`): **SIGINT,
+  SIGTERM, SIGQUIT** caught (graceful shutdown), **SIGPIPE** set to `SIG_IGN` so a
+  write to a disconnected client returns `EPIPE` instead of killing the server. Each
+  `sigaction` call is error-checked and throws `SetupException` on failure.
+- `main()` calls `setupSignals()` inside the existing `try`, before constructing `Server`.
+- `Server::run()` loop is now `while (g_running)`; the `poll() == -1` branch is
+  **`EINTR`-aware** — a signal-interrupted `poll` is not an error, it just `continue`s
+  and lets the loop condition fall through to clean shutdown (real errors still break).
+- `~Server()` now sends `ERROR :Server is shutting down\r\n` to every connected user
+  **before** closing sockets (best-effort; safe because SIGPIPE is ignored), then runs
+  the existing close-fds + delete-users cleanup.
+- **Not implemented (by design):** server-stdin Ctrl+D shutdown — not required by the
+  subject (its Ctrl+D test is client-side packet aggregation, already handled by
+  `getNextLine`), and risky if stdin is closed/redirected. SIGTSTP (Ctrl+Z) left as
+  default job-control suspend.
 
 ## Next steps
-- **Graceful shutdown:** add a signal handler so Ctrl-C makes `run()` break and
-  `~Server()` runs — needed for a fully clean valgrind report (no "still reachable").
-  Pairs with handling `EINTR` on `poll()` as a retry instead of exit.
 - **IRC protocol errors (numerics):** replace `std::cout` "errors" with real numeric
   replies (`461`, `433`, `403`, `401`, `464`, `451`, `421`) sent to the client.
 - **Registration gating:** reject commands before registration with `451`.
