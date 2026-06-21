@@ -181,6 +181,18 @@ bool Server::_processCommand(int fd, std::string& line)
 	if (cmd.command.empty())
 		return (false);
 
+	User* user = _users[fd];
+	if (!user->isRegistered()				//registration gating, commands not allowed if not registered, except pass, nick, user
+		&& cmd.command != "PASS"
+		&& cmd.command != "NICK"
+		&& cmd.command != "USER"
+		&& cmd.command != "CAP"
+		&& cmd.command != "QUIT")
+	{
+		_sendNumeric(fd, "451", ":You have not registered");
+		return (false);
+	}
+
 	if (cmd.command == "NICK")
 		_handleNick(fd, cmd);
 	else if (cmd.command == "JOIN")
@@ -203,22 +215,55 @@ bool Server::_processCommand(int fd, std::string& line)
 		_handleKick(fd, cmd);
 	else if (cmd.command == "MODE")
 		_handleMode(fd, cmd);
+	else if (cmd.command == "CAP")
+		_users[fd]->sendMessage(":ircserv CAP * LS :\r\n");
+	else if (cmd.command == "PING")
+    	_handlePing(fd, cmd);
+	else if (cmd.command == "WHOIS")
+    	_handleWhois(fd, cmd);
 
 	else
 	{
-		std::cout << "Unknown command: " << cmd.command << std::endl;
+		_sendNumeric(fd, "421", cmd.command + " :Unknown command");
 	}
 	return (false);
+}
+
+std::string Server::_userPrefix(User* user) const
+{
+	return ":" + user->getNickname() + "!" + user->getUsername() + "@" + user->getHostname();
+}
+
+void Server::_sendNumeric(int fd, const std::string& code, const std::string& text)
+{
+	std::string nick = _users[fd]->getNickname();
+
+	if (nick.empty())
+		nick = "*";
+	
+	std::string msg = ":ircserv " + code + " " + nick + " " + text + "\r\n";
+
+	_users[fd]->sendMessage(msg);
 }
 
 void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text ending with \r\n
 {
 	if (cmd.params.empty())
+	{
+		_sendNumeric(fd, "461", "JOIN :Not enough parameters");
 		return ;
+	}
 
 	User* user = _users[fd];		//just a pointer to that particular client
 
 	std::string channelName = cmd.params[0];
+
+	if (channelName == "#" || channelName.empty())
+	{
+		_sendNumeric(fd, "403", channelName + " :No such channel");
+		return;
+	}
+
 	std::string key = "";
 
 	if (cmd.params.size() >= 2)
@@ -234,14 +279,14 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 
 	if (channel.addUser(user, key))
 	{
-		std::cout << _users[fd]->getNickname() << " joined " << channelName << std::endl;
-
 		std::string nick = _users[fd]->getNickname();
+
+		std::cout << nick << " joined " << channelName << std::endl;
 
 		if (nick.empty())		//defensive, because already handled in handleNick
 			nick = "*";
 
-		std::string msg = ":" + nick + " JOIN " + channelName + "\r\n";
+		std::string msg = _userPrefix(user) + " JOIN " + channelName + "\r\n";
 
 		_broadcastToChannel(channel, msg, fd);
 		_users[fd]->sendMessage(msg);
@@ -263,8 +308,7 @@ void Server::_handleNick(int fd, const Command& cmd)
 	std::string newNick = cmd.params[0];
 	if (_nicknameExists(newNick, fd))
 	{
-		std::cout << "Nickname already in use: " << newNick << std::endl;
-		_users[fd]->sendMessage(":ircserv 433 * " + newNick + " :Nickname is already in use \r\n");	// error 433 is historic convention for nickname in use
+		_sendNumeric(fd, "433", newNick + " :Nickname is already in use");
 		return ;
 	}
 	_users[fd]->setNickname(newNick);
@@ -304,7 +348,10 @@ void Server::getCommand(Command& cmd, std::string& line)
 		line.erase(0, found + 1); // clean the extracted part from line
 	}
 	else // no space
+	{
 		cmd.command = line; // take all the line
+		line.clear();
+	}
 
 	for(size_t i = 0; i < cmd.command.size(); i++) // covert it to upper case to be sure
 		 cmd.command[i] = toupper(cmd.command[i]);
@@ -347,7 +394,7 @@ void Server::_handlePass(int fd, const Command& cmd)
 	}
 	else
 	{
-		std::cout << "Wrong password" << std::endl;
+		_sendNumeric(fd, "464", ":Password incorrect");
 	}
 }
 
@@ -355,7 +402,7 @@ void Server::_handleUser(int fd, const Command& cmd)	// USER charlie 0 * :Charli
 {
 	if (cmd.params.size() < 4)
 	{
-		std::cout << "USER: not enough parameters" << std::endl;
+		_sendNumeric(fd, "461", "USER :Not enough parameters");
 		return ;
 	}
 
@@ -383,7 +430,11 @@ void Server::_checkRegistration(int fd)
 	{
 		user->setRegistrationAnnounced();
 
-		std::cout << user->getNickname() << " registered" << std::endl;
+		std::string nick = user->getNickname();
+
+		user->sendMessage(":ircserv 001 " + nick + " :Welcome to ft_irc\r\n");
+
+		std::cout << nick << " registered" << std::endl;
 	}
 }
 
@@ -401,7 +452,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUse
 {
 	if (cmd.params.size() < 2)
 	{
-		std::cout << "PRIVMSG: not enough parameters" << std::endl;
+		_sendNumeric(fd, "461", "PRIVMSG :not enough parameters");
 		return ;
 	}
 
@@ -429,7 +480,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUse
 			return ;
 		}
 
-		std::string fullMsg = ":" + user->getNickname() + " PRIVMSG " + target + " :" + msg + "\r\n";
+		std::string fullMsg = _userPrefix(user) + " PRIVMSG " + target + " :" + msg + "\r\n";
 		_broadcastToChannel(channel, fullMsg, fd);
 	}
 	else		// direct message
@@ -440,7 +491,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUse
 			std::cout << "No such nick: " << target << std::endl;
 			return ;
 		}
-		std::string fullMsg = ":" + user->getNickname() + " PRIVMSG " + target + " :" + msg + "\r\n";
+		std::string fullMsg = _userPrefix(user) + " PRIVMSG " + target + " :" + msg + "\r\n";
 		targetUser->sendMessage(fullMsg);
 	}
 }
@@ -459,7 +510,7 @@ void Server::_handlePart(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
 	{
-		std::cout << "PART: not enough parameters" << std::endl;
+		_sendNumeric(fd, "461", "PART :Not enough parameters");
 		return ;
 	}
 
@@ -481,7 +532,7 @@ void Server::_handlePart(int fd, const Command& cmd)
 		return ;
 	}
 
-	std::string msg = ":" + user->getNickname()
+	std::string msg = _userPrefix(user)
 					+ " PART "
 					+ channelName
 					+ "\r\n";
@@ -507,7 +558,7 @@ bool Server::_handleQuit(int fd, const Command& cmd)
 	if (!cmd.params.empty())
 		reason = cmd.params[0];
 
-	std::string msg = ":" + user->getNickname()
+	std::string msg = _userPrefix(user)
 					+ " QUIT :"
 					+ reason
 					+ "\r\n";
@@ -540,7 +591,7 @@ void Server::_handleTopic(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
 	{
-		std::cout << "TOPIC: not enough parameters" << std::endl;
+		_sendNumeric(fd, "461", "TOPIC :Not enough parameters");
 		return ;
 	}
 
@@ -571,7 +622,7 @@ void Server::_handleTopic(int fd, const Command& cmd)
 	std::string topic = cmd.params[1];
 	channel.setTopic(topic);
 
-	std::string msg = ":" + user->getNickname() + " TOPIC " + channelName + " :" + topic + "\r\n";
+	std::string msg = _userPrefix(user) + " TOPIC " + channelName + " :" + topic + "\r\n";
 
 	_broadcastToChannel(channel, msg, -1);
 }
@@ -580,7 +631,7 @@ void Server::_handleInvite(int fd, const Command& cmd)
 {
 	if (cmd.params.size() < 2)
 	{
-		std::cout << "INVITE: not enough parameters" << std::endl;
+		_sendNumeric(fd, "461", "INVITE :Not enough parameters");
 		return ;
 	}
 
@@ -634,7 +685,7 @@ void Server::_handleKick(int fd, const Command& cmd)
 {
 	if (cmd.params.size() < 2)
 	{
-		std::cout << "KICK: not enough parameters" << std::endl;
+		_sendNumeric(fd, "461", "KICK :Not enough parameters");
 		return ;
 	}
 
@@ -688,7 +739,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
 	{
-		std::cout << "MODE: not enough parameters" << std::endl;
+		_sendNumeric(fd, "461", "MODE :Not enough parameters");
 		return ;
 	}
 
@@ -804,7 +855,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 		return ;
 	}
 
-	std::string msg = ":" + user->getNickname() + " MODE " + channelName + " " + mode;
+	std::string msg = _userPrefix(user) + " MODE " + channelName + " " + mode;
 	if ((flag == 'k' || flag == 'l' || flag == 'o') && cmd.params.size() >= 3)
 		msg = msg + " " + cmd.params[2];
 
@@ -827,4 +878,42 @@ void Server::_disconnectClient(int fd)
 	close(fd);
 	delete _users[fd];
 	_users.erase(fd);
+}
+
+void Server::_handlePing(int fd, const Command& cmd)
+{
+    if (cmd.params.empty())
+    {
+        _sendNumeric(fd, "461", "PING :Not enough parameters");
+        return;
+    }
+
+    _users[fd]->sendMessage(":ircserv PONG ircserv :" + cmd.params[0] + "\r\n");
+}
+
+void Server::_handleWhois(int fd, const Command& cmd)
+{
+    if (cmd.params.empty())
+    {
+        _sendNumeric(fd, "461", "WHOIS :Not enough parameters");
+        return;
+    }
+
+    User* target = _findUserByNickname(cmd.params[0]);
+    if (!target)
+    {
+        _sendNumeric(fd, "401", cmd.params[0] + " :No such nick");
+        return;
+    }
+
+    std::string nick = target->getNickname();
+    std::string user = target->getUsername();
+    std::string host = target->getHostname();
+    std::string real = target->getRealname();
+
+    _users[fd]->sendMessage(":ircserv 311 " + _users[fd]->getNickname()
+        + " " + nick + " " + user + " " + host + " * :" + real + "\r\n");
+
+    _users[fd]->sendMessage(":ircserv 318 " + _users[fd]->getNickname()
+        + " " + nick + " :End of WHOIS list\r\n");
 }

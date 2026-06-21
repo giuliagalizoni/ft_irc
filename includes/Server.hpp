@@ -59,6 +59,11 @@ class Server
 		void _handleMode(int fd, const Command& cmd);
 		void _disconnectClient(int fd);
 
+		std::string _userPrefix(User* user) const;
+		void _sendNumeric(int fd, const std::string& code, const std::string& text);
+		void _handlePing(int fd, const Command& cmd);
+		void _handleWhois(int fd, const Command& cmd);
+
 	public:
 		Server(int port, const std::string& password);
 		~Server();

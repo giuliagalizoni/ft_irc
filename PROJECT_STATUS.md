@@ -115,13 +115,6 @@ reconnect keeps the server alive at ~0% CPU, one clean `User deleted` per client
   default job-control suspend.
 
 ## Next steps
-- **IRC protocol errors (numerics):** replace `std::cout` "errors" with real numeric
-  replies (`461`, `433`, `403`, `401`, `464`, `451`, `421`) sent to the client.
-- **Registration gating:** reject commands before registration with `451`.
-- **Message prefix:** outgoing PRIVMSG/JOIN/PART/QUIT/TOPIC/INVITE/KICK use `:nick` only; RFC form is the
-  full `:nick!user@host` (affects JOIN, PART, QUIT, KICK too)
-- Remove leftover debug `std::cout` lines before submission
-- More commands: MODE
 - Test with IRC client irssi
 
 ## How to run
@@ -148,3 +141,10 @@ Channel message
 
 Direct message
     PRIVMSG bob :hello privately
+
+irssi:
+/connect localhost 6667 pass
+
+You can switch windows with:
+Alt+1
+Alt+2
