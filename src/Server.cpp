@@ -57,9 +57,13 @@ Server::Server(int port, const std::string& password) : _port(port), _password(p
 
 Server::~Server()
 {
+	// notify clients that the server closed before closing the fds
+	for (std::map<int, User*>::iterator it = _users.begin(); it != _users.end(); ++it)
+		it->second->sendMessage("ERROR :Server is shutting down\r\n");
+
+	// closing the fds before deleting the users
 	for (std::vector<struct pollfd>::iterator it = _fds.begin(); it != _fds.end(); ++it)
 	{
-		// iterator behaves like a pointer
 		if (it->fd != -1)
 			close(it->fd);
 	}
