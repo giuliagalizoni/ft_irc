@@ -1,5 +1,5 @@
 #ifndef USER_HPP
-# define USER_HPP
+#define USER_HPP
 
 #include <string>
 
@@ -18,7 +18,7 @@ class User
 		bool _nickReceived;
 		bool _userReceived;
 
-		bool _registrationAnnounced; // for the case that a user has been registered, but then a nickname change shouldn't print out the new nickname is registered
+		bool _registrationAnnounced; // true after 001 is sent; prevents re-announcing on nick change
 		bool _disconnecting; // to handle disconection without shutting down the server
 
 
@@ -32,7 +32,7 @@ class User
 
 
 		void appendToBuffer(const std::string& data); // appends raw bytes to _buffer
-		bool getNextLine(std::string& line); // extracts one `\r\n`-terminated line from `_buffer`, returns false if none available
+		bool getNextLine(std::string& line); // returns false if no complete line available
 
 		void sendMessage(const std::string& msg);
 		bool hasPendingOutput() const;

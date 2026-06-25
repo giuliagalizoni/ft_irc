@@ -1,14 +1,14 @@
 #ifndef SERVER_HPP
-# define SERVER_HPP
+#define SERVER_HPP
 
-# include "User.hpp"
-# include "Channel.hpp"
-# include "Command.hpp"
+#include "User.hpp"
+#include "Channel.hpp"
+#include "Command.hpp"
 
-# include <string>
-# include <vector>
-# include <map>
-# include <poll.h>
+#include <string>
+#include <vector>
+#include <map>
+#include <poll.h>
 
 class Server
 {

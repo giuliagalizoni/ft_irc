@@ -247,9 +247,9 @@ bool Server::_processCommand(int fd, std::string& line)
 			_users[fd]->sendMessage(":ircserv CAP * LS :\r\n");
 	}
 	else if (cmd.command == "PING")
-    	_handlePing(fd, cmd);
+		_handlePing(fd, cmd);
 	else if (cmd.command == "WHOIS")
-    	_handleWhois(fd, cmd);
+		_handleWhois(fd, cmd);
 
 	else
 	{
@@ -413,7 +413,7 @@ void Server::_broadcastToChannel(Channel& channel, const std::string& msg, int e
 
 	for (std::set<User*>::const_iterator it = users.begin(); it != users.end(); ++it)
 	{
-		if ((*it)->getFd() != exceptFd)			// the exceptFd is the one of the just joined user, to avoid sending the message to him, which would send it duplicated.
+		if ((*it)->getFd() != exceptFd)
 			(*it)->sendMessage(msg);
 	}
 }
@@ -531,13 +531,13 @@ bool Server::_nicknameExists(const std::string& nickname, int exceptFd) const
 {
 	for (std::map<int, User*>::const_iterator it = _users.begin(); it != _users.end(); ++it)
 	{
-		if (it->first != exceptFd && it->second->getNickname() == nickname)	// we have to avoid the current user, so exceptFd in the first part of the pair. The second is the comparison with the nickname
+		if (it->first != exceptFd && it->second->getNickname() == nickname)
 			return (true);
 	}
 	return (false);
 }
 
-void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUser. To parse something like: PRIVMSG #test :hello charlie
+void Server::_handlePrivmsg(int fd, const Command& cmd)
 {
 	if (cmd.params.size() < 2)
 	{
@@ -859,13 +859,13 @@ void Server::_handleMode(int fd, const Command& cmd)
 	User* user = _users[fd];
 
 	std::string channelName = cmd.params[0];
-    if (channelName.empty() || channelName[0] != '#')
-    {
-        // Non-channel target = user-mode query (irssi auto-sends "MODE <nick>" on
-        // connect). No user modes are implemented, so report an empty mode set.
-        _sendNumeric(fd, "221", "+");
-        return;
-    }
+	if (channelName.empty() || channelName[0] != '#')
+	{
+		// Non-channel target = user-mode query (irssi auto-sends "MODE <nick>" on
+		// connect). No user modes are implemented, so report an empty mode set.
+		_sendNumeric(fd, "221", "+");
+		return;
+	}
 
 	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
 	if (it == _channels.end())
@@ -1026,38 +1026,33 @@ void Server::_disconnectClient(int fd)
 
 void Server::_handlePing(int fd, const Command& cmd)
 {
-    if (cmd.params.empty())
-    {
-        _sendNumeric(fd, "461", "PING :Not enough parameters");
-        return;
-    }
-
-    _users[fd]->sendMessage(":ircserv PONG ircserv :" + cmd.params[0] + "\r\n");
+	if (cmd.params.empty())
+	{
+		_sendNumeric(fd, "461", "PING :Not enough parameters");
+		return;
+	}
+	_users[fd]->sendMessage(":ircserv PONG ircserv :" + cmd.params[0] + "\r\n");
 }
 
 void Server::_handleWhois(int fd, const Command& cmd)
 {
-    if (cmd.params.empty())
-    {
-        _sendNumeric(fd, "461", "WHOIS :Not enough parameters");
-        return;
-    }
-
-    User* target = _findUserByNickname(cmd.params[0]);
-    if (!target)
-    {
-        _sendNumeric(fd, "401", cmd.params[0] + " :No such nick");
-        return;
-    }
-
-    std::string nick = target->getNickname();
-    std::string user = target->getUsername();
-    std::string host = target->getHostname();
-    std::string real = target->getRealname();
-
-    _users[fd]->sendMessage(":ircserv 311 " + _users[fd]->getNickname()
-        + " " + nick + " " + user + " " + host + " * :" + real + "\r\n");
-
-    _users[fd]->sendMessage(":ircserv 318 " + _users[fd]->getNickname()
-        + " " + nick + " :End of WHOIS list\r\n");
+	if (cmd.params.empty())
+	{
+		_sendNumeric(fd, "461", "WHOIS :Not enough parameters");
+		return;
+	}
+	User* target = _findUserByNickname(cmd.params[0]);
+	if (!target)
+	{
+		_sendNumeric(fd, "401", cmd.params[0] + " :No such nick");
+		return;
+	}
+	std::string nick = target->getNickname();
+	std::string user = target->getUsername();
+	std::string host = target->getHostname();
+	std::string real = target->getRealname();
+	_users[fd]->sendMessage(":ircserv 311 " + _users[fd]->getNickname()
+		+ " " + nick + " " + user + " " + host + " * :" + real + "\r\n");
+	_users[fd]->sendMessage(":ircserv 318 " + _users[fd]->getNickname()
+		+ " " + nick + " :End of WHOIS list\r\n");
 }

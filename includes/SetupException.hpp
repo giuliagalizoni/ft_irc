@@ -1,8 +1,8 @@
 #ifndef SETUPEXCEPTION_HPP
-# define SETUPEXCEPTION_HPP
+#define SETUPEXCEPTION_HPP
 
-# include <exception>
-# include <string>
+#include <exception>
+#include <string>
 
 class SetupException : public std::exception
 {

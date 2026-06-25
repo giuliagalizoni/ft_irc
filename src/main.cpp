@@ -1,11 +1,11 @@
+#include "../includes/Server.hpp"
+#include "../includes/signals.hpp"
+
 #include <iostream>
 #include <string>
 #include <sstream>
 #include <cctype>
 #include <exception>
-
-#include "../includes/Server.hpp"
-#include "../includes/signals.hpp"
 
 int validPort(char *str)
 {
