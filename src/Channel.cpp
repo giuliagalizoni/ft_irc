@@ -84,24 +84,22 @@ bool Channel::isInvited(User* user) const
     return (_invitedUsers.find(user) != _invitedUsers.end());
 }
 
-bool Channel::canJoin(User* user, const std::string& key) const
+Channel::JoinResult Channel::canJoin(User* user, const std::string& key) const
 {
-    if (!user)
-        return (false);
-    if (hasUser(user))
-        return (false);
+    if (!user || hasUser(user))
+        return (JOIN_ALREADY);
     if (_inviteOnly && !isInvited(user))
-        return (false);
+        return (JOIN_INVITEONLY);
     if (_hasKey && key != _key)
-        return (false);
+        return (JOIN_BADKEY);
     if (_hasUserLimit && _users.size() >= _userLimit)
-        return (false);
-    return (true);
+        return (JOIN_FULL);
+    return (JOIN_OK);
 }
 
 bool Channel::addUser(User* user, const std::string& key)
 {
-    if (!canJoin(user, key))
+    if (canJoin(user, key) != JOIN_OK)
         return (false);
     _users.insert(user);
     _invitedUsers.erase(user);      //canJoin already checks if there is invitation, and erase doesnt crash erasing a non-existent user

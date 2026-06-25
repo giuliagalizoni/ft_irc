@@ -37,6 +37,9 @@ class Channel
         size_t              _userLimit;          
 
     public:
+        // Reason a join is allowed or refused, so the caller can pick the right numeric.
+        enum JoinResult { JOIN_OK, JOIN_ALREADY, JOIN_INVITEONLY, JOIN_BADKEY, JOIN_FULL };
+
         Channel();
         Channel(const std::string& name);
         Channel(const Channel& other);
@@ -70,7 +73,7 @@ class Channel
         void setUserLimit(size_t limit);
         void removeUserLimit();
 
-        bool canJoin(User* user, const std::string& key) const;
+        JoinResult canJoin(User* user, const std::string& key) const;
         bool canChangeTopic(User* user) const;
 
         const std::set<User*>& getUsers() const;    

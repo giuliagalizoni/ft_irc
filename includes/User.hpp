@@ -8,6 +8,7 @@ class User
 	private:
 		int _fd;
 		std::string _buffer;
+		std::string _outBuffer;
 		std::string _hostname; // from accept
 		std::string _nickname;
 		std::string _username;
@@ -20,6 +21,7 @@ class User
 		bool _registrationAnnounced; // for the case that a user has been registered, but then a nickname change shouldn't print out the new nickname is registered
 		bool _disconnecting; // to handle disconection without shutting down the server
 
+
 		User();
 		User(const User& other);
 		User& operator=(const User& other);
@@ -31,7 +33,10 @@ class User
 
 		void appendToBuffer(const std::string& data); // appends raw bytes to _buffer
 		bool getNextLine(std::string& line); // extracts one `\r\n`-terminated line from `_buffer`, returns false if none available
+
 		void sendMessage(const std::string& msg);
+		bool hasPendingOutput() const;
+		void flushOutput();
 
 		int getFd() const;
 		bool isRegistered() const; // true when all three flags are set
