@@ -16,7 +16,7 @@
 
 static const int BUFFER_SIZE = 512;
 
-
+// Creates the server socket, sets socket options, binds to the port, and starts listening.
 Server::Server(int port, const std::string& password) : _port(port), _password(password)
 {
 	_serverFd = socket(AF_INET, SOCK_STREAM, 0);
@@ -30,20 +30,19 @@ Server::Server(int port, const std::string& password) : _port(port), _password(p
 		close(_serverFd);
 		throw SetupException("setsockopt failed");
 	}
-	// binding socket
-	struct sockaddr_in addr; // IPv4 socket address structure
-	memset(&addr, 0, sizeof(addr)); // initialize struct with zeros
-	addr.sin_family = AF_INET; // IPv4
-	addr.sin_port = htons(_port); // convert the port to network byte order.
-	addr.sin_addr.s_addr = INADDR_ANY; // accept connections on any interface
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(_port);
+	addr.sin_addr.s_addr = INADDR_ANY;
 
-	if (bind(_serverFd, (struct sockaddr*)&addr, sizeof(addr)) == -1) // bind socket to address
+	if (bind(_serverFd, (struct sockaddr*)&addr, sizeof(addr)) == -1)
 	{
 		close(_serverFd);
 		throw SetupException("bind failed");
 	}
 
-	if (listen(_serverFd, SOMAXCONN) == -1)// mark the socket as passive (waiting for connections)
+	if (listen(_serverFd, SOMAXCONN) == -1)
 	{
 		close(_serverFd);
 		throw SetupException("listen failed");
@@ -58,29 +57,28 @@ Server::Server(int port, const std::string& password) : _port(port), _password(p
 	std::cout << "Server listening in port " << _port << std::endl;
 }
 
+// Notifies all clients of shutdown, closes all file descriptors, and frees all User objects.
 Server::~Server()
 {
-	// notify clients that the server closed before closing the fds
 	for (std::map<int, User*>::iterator it = _users.begin(); it != _users.end(); ++it)
 	{
 		it->second->sendMessage("ERROR :Server is shutting down\r\n");
 		it->second->flushOutput();
 	}
 
-	// closing the fds before deleting the users
 	for (std::vector<struct pollfd>::iterator it = _fds.begin(); it != _fds.end(); ++it)
 	{
 		if (it->fd != -1)
 			close(it->fd);
 	}
 
-	// delete all users
 	for (std::map<int, User*>::iterator it = _users.begin(); it != _users.end(); ++it)
-		delete it->second; // iterators for maps have first and second
+		delete it->second;
 
 	std::cout << "Server is closed, all Users are deleted. Bye 👋" << std::endl;
 }
 
+// Accepts a pending connection, sets it non-blocking, and registers the new User.
 void Server::_acceptClient()
 {
 	struct sockaddr_in addr;
@@ -103,6 +101,7 @@ void Server::_acceptClient()
 	std::cout << "client connected" << std::endl;
 }
 
+// Main poll loop: updates events, dispatches read/write, and processes deferred disconnects.
 void Server::run()
 {
 	while (g_running)
@@ -111,15 +110,15 @@ void Server::run()
 		{
 			if (_fds[i].fd == _serverFd)
 			{
-				_fds[i].events = POLLIN; // listening socket only ever "reads" (accepts)
+				_fds[i].events = POLLIN;
 				continue;
 			}
 
-			_fds[i].events = POLLIN; // always interested in incoming data
+			_fds[i].events = POLLIN;
 
 			std::map<int, User*>::iterator it = _users.find(_fds[i].fd);
 			if (it != _users.end() && it->second->hasPendingOutput())
-				_fds[i].events |= POLLOUT; // also want to write, but only when we have data
+				_fds[i].events |= POLLOUT;
 		}
 		if (poll(&_fds[0], _fds.size(), -1) == -1)
 		{
@@ -166,6 +165,7 @@ void Server::run()
 	}
 }
 
+// Reads data from a client fd, feeds it to the input buffer, and dispatches complete lines.
 void Server::_handleClient(int fd)
 {
 	char buffer[BUFFER_SIZE];
@@ -174,17 +174,14 @@ void Server::_handleClient(int fd)
 	std::map<int, User*>::iterator it = _users.find(fd);
 	if (it == _users.end())
 		return ;
-	ssize_t bytes = recv(fd, buffer, sizeof(buffer), 0); // read data from socket into buffer
-	if (bytes <= 0) // in case recv fails . recv() can return -1 too, so bytes <= 0
+	ssize_t bytes = recv(fd, buffer, sizeof(buffer), 0);
+	if (bytes <= 0)
 	{
 		it->second->setDisconnecting();
-		// delete it->second; // free the User*  (->second is the value)
-		// _users.erase(it); // remove the map entry
-		// close(fd);
 		std::cout << "client disconnected" << std::endl;
 		return;
 	}
-	else // in case it works
+	else
 	{
 		std::string line;
 		User* user = it->second;
@@ -192,14 +189,15 @@ void Server::_handleClient(int fd)
 		user->appendToBuffer(std::string(buffer, bytes));
 		while (user->getNextLine(line))
 		{
-			//std::cout << line << std::endl;.... in order to generalise it:
-			if (_processCommand(fd, line))		//conditional for checking if user QUITTED
+			if (_processCommand(fd, line))
 				return ;
 		}
 	}
 	return;
 }
 
+// Parses one IRC line and dispatches it to the right handler.
+// Unregistered users are blocked except for PASS, NICK, USER, CAP, and QUIT.
 bool Server::_processCommand(int fd, std::string& line)
 {
 	Command cmd = _parseCommand(line);
@@ -207,7 +205,7 @@ bool Server::_processCommand(int fd, std::string& line)
 		return (false);
 
 	User* user = _users[fd];
-	if (!user->isRegistered()				//registration gating, commands not allowed if not registered, except pass, nick, user
+	if (!user->isRegistered()
 		&& cmd.command != "PASS"
 		&& cmd.command != "NICK"
 		&& cmd.command != "USER"
@@ -242,7 +240,6 @@ bool Server::_processCommand(int fd, std::string& line)
 		_handleMode(fd, cmd);
 	else if (cmd.command == "CAP")
 	{
-		// Only answer the LS query; ignore CAP END (and others) so we don't reply twice.
 		if (!cmd.params.empty() && cmd.params[0] == "LS")
 			_users[fd]->sendMessage(":ircserv CAP * LS :\r\n");
 	}
@@ -250,7 +247,6 @@ bool Server::_processCommand(int fd, std::string& line)
 		_handlePing(fd, cmd);
 	else if (cmd.command == "WHOIS")
 		_handleWhois(fd, cmd);
-
 	else
 	{
 		_sendNumeric(fd, "421", cmd.command + " :Unknown command");
@@ -258,11 +254,13 @@ bool Server::_processCommand(int fd, std::string& line)
 	return (false);
 }
 
+// Builds the nick!user@host prefix string for outgoing IRC messages.
 std::string Server::_userPrefix(User* user) const
 {
 	return ":" + user->getNickname() + "!" + user->getUsername() + "@" + user->getHostname();
 }
 
+// Formats and sends an IRC numeric reply (e.g. 001, 433) to the given client.
 void Server::_sendNumeric(int fd, const std::string& code, const std::string& text)
 {
 	std::string nick = _users[fd]->getNickname();
@@ -275,7 +273,8 @@ void Server::_sendNumeric(int fd, const std::string& code, const std::string& te
 	_users[fd]->sendMessage(msg);
 }
 
-void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text ending with \r\n
+// Handles JOIN: creates the channel if needed, enforces modes, and sends 353/366 name list.
+void Server::_handleJoin(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
 	{
@@ -283,7 +282,7 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 		return ;
 	}
 
-	User* user = _users[fd];		//just a pointer to that particular client
+	User* user = _users[fd];
 
 	std::string channelName = cmd.params[0];
 
@@ -301,10 +300,10 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 	if (channelName[0] != '#')
 		channelName = "#" + channelName;
 
-	if (_channels.find(channelName) == _channels.end())		//_channels.end() means it didnt find any in the iteration
-		_channels[channelName] = Channel(channelName);		// creates the Channel object and store it under channelName
+	if (_channels.find(channelName) == _channels.end())
+		_channels[channelName] = Channel(channelName);
 
-	Channel& channel = _channels[channelName];				// just a reference to the channelName object
+	Channel& channel = _channels[channelName];
 
 	if (channel.addUser(user, key))
 	{
@@ -344,16 +343,16 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 		std::cout << _users[fd]->getNickname() << " could not join " << channelName << std::endl;
 	}
 
-	//some debug
 	std::cout << "Channel users: " << channel.getUsers().size() << std::endl;
 }
 
+// Returns true if the nickname is valid per IRC rules (length, allowed characters, no leading digit).
 static bool isValidNickname(const std::string& nick)
 {
 	if (nick.empty() || nick.size() > 30)
 		return false;
 	if (std::isdigit(static_cast<unsigned char>(nick[0])))
-		return false;							  // can't start with a digit
+		return false;
 	for (size_t i = 0; i < nick.size(); ++i)
 	{
 		char c = nick[i];
@@ -361,12 +360,13 @@ static bool isValidNickname(const std::string& nick)
 			c != '-' && c != '_' && c != '[' && c != ']' &&
 			c != '{' && c != '}' && c != '\\' && c != '|' &&
 			c != '^' && c != '`')
-			return false;						  // illegal character
+			return false;
 	}
 	return true;
 }
 
 
+// Handles NICK: validates the new nickname, checks uniqueness, and notifies channel members on change.
 void Server::_handleNick(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
@@ -390,16 +390,16 @@ void Server::_handleNick(int fd, const Command& cmd)
 	}
 
 	bool registered = _users[fd]->isRegistered();
-	std::string oldPrefix = _userPrefix(_users[fd]);   // capture BEFORE the rename
+	std::string oldPrefix = _userPrefix(_users[fd]);
 	_users[fd]->setNickname(newNick);
 
 	if (registered)
 	{
 		std::string msg = oldPrefix + " NICK :" + newNick + "\r\n";
-		_users[fd]->sendMessage(msg);				  // tell the user themselves
+		_users[fd]->sendMessage(msg);
 		for (std::map<std::string, Channel>::iterator it = _channels.begin(); it != _channels.end(); ++it)
 			if (it->second.hasUser(_users[fd]))
-				_broadcastToChannel(it->second, msg, fd);  // others, skip self
+				_broadcastToChannel(it->second, msg, fd);
 	}
 
 	std::cout << "fd " << fd << " is now nicknamed " << _users[fd]->getNickname() << std::endl;
@@ -407,6 +407,7 @@ void Server::_handleNick(int fd, const Command& cmd)
 	_checkRegistration(fd);
 }
 
+// Sends a message to every member of the channel except the one with exceptFd.
 void Server::_broadcastToChannel(Channel& channel, const std::string& msg, int exceptFd)
 {
 	const std::set<User*>& users = channel.getUsers();
@@ -418,6 +419,7 @@ void Server::_broadcastToChannel(Channel& channel, const std::string& msg, int e
 	}
 }
 
+// Splits a raw IRC line into a Command struct (command word + parameter list).
 Command Server::_parseCommand(std::string& line)
 {
 	Command cmd;
@@ -428,48 +430,51 @@ Command Server::_parseCommand(std::string& line)
 	return (cmd);
 }
 
+// Extracts and uppercases the command word from the front of line.
 void Server::getCommand(Command& cmd, std::string& line)
 {
-	std::size_t found = line.find(" "); // find the first space
-	if (found != std::string::npos) // if there's a space
+	std::size_t found = line.find(" ");
+	if (found != std::string::npos)
 	{
-		cmd.command = line.substr(0, found); // extract the command up to the space
-		line.erase(0, found + 1); // clean the extracted part from line
+		cmd.command = line.substr(0, found);
+		line.erase(0, found + 1);
 	}
-	else // no space
+	else
 	{
-		cmd.command = line; // take all the line
+		cmd.command = line;
 		line.clear();
 	}
 
-	for(size_t i = 0; i < cmd.command.size(); i++) // covert it to upper case to be sure
+	for(size_t i = 0; i < cmd.command.size(); i++)
 		 cmd.command[i] = toupper(cmd.command[i]);
 }
 
+// Extracts all parameters from line into cmd.params, respecting the trailing ':' convention.
 void Server::getParams(Command& cmd, std::string& line)
 {
-	while(!line.empty()) // while there's still something remaining in line
+	while(!line.empty())
 	{
-		if (line[0] == ':') // if it's starts with :
+		if (line[0] == ':')
 		{
-			cmd.params.push_back(line.substr(1)); // add everything from after the :
-			break; // and exit the loop
+			cmd.params.push_back(line.substr(1));
+			break;
 		}
-		std::size_t found = line.find(" "); // find the next space
-		if (found != std::string::npos) // it there's one
+		std::size_t found = line.find(" ");
+		if (found != std::string::npos)
 		{
 			if (found != 0)
-				cmd.params.push_back(line.substr(0, found)); // push everything up to the space to params vector
-			line.erase(0, found + 1); // clean the extracted part
+				cmd.params.push_back(line.substr(0, found));
+			line.erase(0, found + 1);
 		}
-		else // if there's no space and line is not empty, it's the last parameter
+		else
 		{
-			cmd.params.push_back(line); // push everything in line
-			break; // exit the loop
+			cmd.params.push_back(line);
+			break;
 		}
 	}
 }
 
+// Handles PASS: checks the password and marks it received.
 void Server::_handlePass(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
@@ -487,7 +492,8 @@ void Server::_handlePass(int fd, const Command& cmd)
 	}
 }
 
-void Server::_handleUser(int fd, const Command& cmd)	// USER charlie 0 * :Charlie Chaplin
+// Handles USER: sets the username and real name from the command parameters.
+void Server::_handleUser(int fd, const Command& cmd)
 {
 	if (cmd.params.size() < 4)
 	{
@@ -511,6 +517,7 @@ void Server::_handleUser(int fd, const Command& cmd)	// USER charlie 0 * :Charli
 	_checkRegistration(fd);
 }
 
+// Sends the 001 welcome message once PASS, NICK, and USER have all been received.
 void Server::_checkRegistration(int fd)
 {
 	User* user = _users[fd];
@@ -527,6 +534,7 @@ void Server::_checkRegistration(int fd)
 	}
 }
 
+// Returns true if any connected user (other than exceptFd) holds the given nickname.
 bool Server::_nicknameExists(const std::string& nickname, int exceptFd) const
 {
 	for (std::map<int, User*>::const_iterator it = _users.begin(); it != _users.end(); ++it)
@@ -537,6 +545,7 @@ bool Server::_nicknameExists(const std::string& nickname, int exceptFd) const
 	return (false);
 }
 
+// Handles PRIVMSG: routes a message to a channel or directly to a user.
 void Server::_handlePrivmsg(int fd, const Command& cmd)
 {
 	if (cmd.params.size() < 2)
@@ -548,7 +557,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)
 	User* user = _users[fd];
 
 	std::string target = cmd.params[0];
-	std::string msg = cmd.params[1];	//but actually is from 3 on...
+	std::string msg = cmd.params[1];
 
 	if (target.empty())
 	{
@@ -564,8 +573,6 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)
 
 	if (target[0] == '#')
 	{
-		// channel message. send message to everyboyd in the channel except the own user... :Groucho PRIVMSG #test :hello charlie
-		// to broadcast we need the channel object, not just its name
 		std::map<std::string, Channel>::iterator it = _channels.find(target);
 		if (it == _channels.end())
 		{
@@ -574,7 +581,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)
 			return ;
 		}
 
-		Channel& channel = it->second;			// key: #test; value: Channel("#test")
+		Channel& channel = it->second;
 
 		if (!channel.hasUser(user))
 		{
@@ -586,7 +593,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)
 		std::string fullMsg = _userPrefix(user) + " PRIVMSG " + target + " :" + msg + "\r\n";
 		_broadcastToChannel(channel, fullMsg, fd);
 	}
-	else		// direct message
+	else
 	{
 		User* targetUser = _findUserByNickname(target);
 		if (!targetUser)
@@ -600,6 +607,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)
 	}
 }
 
+// Returns a pointer to the connected User with the given nickname, or NULL if not found.
 User* Server::_findUserByNickname(const std::string& nickname) const
 {
 	for (std::map<int, User*>::const_iterator it = _users.begin(); it != _users.end(); ++it)
@@ -610,6 +618,7 @@ User* Server::_findUserByNickname(const std::string& nickname) const
 	return (NULL);
 }
 
+// Handles PART: removes the user from the channel and destroys the channel if it becomes empty.
 void Server::_handlePart(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
@@ -656,6 +665,7 @@ void Server::_handlePart(int fd, const Command& cmd)
 		_channels.erase(channelName);
 }
 
+// Handles QUIT: notifies all channels the user is in, then flags the client for disconnect.
 bool Server::_handleQuit(int fd, const Command& cmd)
 {
 	User* user = _users[fd];
@@ -677,10 +687,11 @@ bool Server::_handleQuit(int fd, const Command& cmd)
 			_broadcastToChannel(channel, msg, fd);
 	}
 
-	_users[fd]->setDisconnecting(); // setting the flag instead of deleting here
+	_users[fd]->setDisconnecting();
 	return (true);
 }
 
+// Handles TOPIC: sends the current topic (no argument) or sets a new one, respecting mode +t.
 void Server::_handleTopic(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
@@ -727,6 +738,7 @@ void Server::_handleTopic(int fd, const Command& cmd)
 	_broadcastToChannel(channel, msg, -1);
 }
 
+// Handles INVITE: checks operator status and adds the target to the channel invite list.
 void Server::_handleInvite(int fd, const Command& cmd)
 {
 	if (cmd.params.size() < 2)
@@ -788,6 +800,7 @@ void Server::_handleInvite(int fd, const Command& cmd)
 	std::cout << inviter->getNickname() << " invited " << invitedUser->getNickname() << " to " << channelName << std::endl;
 }
 
+// Handles KICK: checks operator status and removes the target from the channel.
 void Server::_handleKick(int fd, const Command& cmd)
 {
 	if (cmd.params.size() < 2)
@@ -848,6 +861,7 @@ void Server::_handleKick(int fd, const Command& cmd)
 	std::cout << kicker->getNickname() << " kicked " << targetNick << " from " << channelName << std::endl;
 }
 
+// Handles MODE: applies or queries channel modes i, t, k, l, o; ignores user-mode queries.
 void Server::_handleMode(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
@@ -861,8 +875,6 @@ void Server::_handleMode(int fd, const Command& cmd)
 	std::string channelName = cmd.params[0];
 	if (channelName.empty() || channelName[0] != '#')
 	{
-		// Non-channel target = user-mode query (irssi auto-sends "MODE <nick>" on
-		// connect). No user modes are implemented, so report an empty mode set.
 		_sendNumeric(fd, "221", "+");
 		return;
 	}
@@ -886,8 +898,6 @@ void Server::_handleMode(int fd, const Command& cmd)
 
 	std::string mode = cmd.params[1];
 
-	// Ban-list query (irssi auto-sends "MODE #chan b" on join). It's a read, not a
-	// change, so answer with an empty ban list and don't require operator status.
 	if (mode == "b" || mode == "+b" || mode == "-b")
 	{
 		_sendNumeric(fd, "368", channelName + " :End of channel ban list");
@@ -959,7 +969,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 		else
 			channel.removeUserLimit();
 	}
-	else if (flag == 'o')	//give operator privileges
+	else if (flag == 'o')
 	{
 		if (cmd.params.size() < 3)
 		{
@@ -997,6 +1007,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 	_broadcastToChannel(channel, msg, -1);
 }
 
+// Removes a client from all channels, the poll list, and the user map; closes the fd and frees memory.
 void Server::_disconnectClient(int fd)
 {
 	User* user = _users[fd];
@@ -1024,6 +1035,7 @@ void Server::_disconnectClient(int fd)
 	_users.erase(fd);
 }
 
+// Handles PING: replies with PONG to keep the connection alive.
 void Server::_handlePing(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
@@ -1034,6 +1046,7 @@ void Server::_handlePing(int fd, const Command& cmd)
 	_users[fd]->sendMessage(":ircserv PONG ircserv :" + cmd.params[0] + "\r\n");
 }
 
+// Handles WHOIS: sends 311 with user info and 318 to mark the end of the reply.
 void Server::_handleWhois(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())

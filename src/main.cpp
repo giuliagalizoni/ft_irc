@@ -7,11 +7,11 @@
 #include <cctype>
 #include <exception>
 
+// Parses and validates the port argument from argv; returns the port number or -1 on error.
 int validPort(char *str)
 {
 	if (str[0] == '+')
 		return -1;
-	// TODO: check leading spaces
 	std::istringstream iss(str);
 	long port;
 	iss >> port;
@@ -24,6 +24,7 @@ int validPort(char *str)
 	return port;
 }
 
+// Returns true if the password is non-empty and contains no whitespace or control characters.
 bool validPass(const std::string& pass)
 {
 	if (pass.empty())
@@ -38,6 +39,7 @@ bool validPass(const std::string& pass)
 	return true;
 }
 
+// Entry point: validates args, sets up signals, and runs the server.
 int main(int argc, char **argv)
 {
 	if (argc != 3)
