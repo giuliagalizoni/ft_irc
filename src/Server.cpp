@@ -8,22 +8,24 @@
 #include <unistd.h>
 #include <cstring>
 #include <cctype>
-#include <cstdlib> //for atoi
+#include <cstdlib>
 #include <cerrno>
+#include <fcntl.h>
+#include <sstream>
+
 
 static const int BUFFER_SIZE = 512;
 
 
-// TODO: break this logic into helpers
 Server::Server(int port, const std::string& password) : _port(port), _password(password)
 {
-	// create listening IPv4 TCP socket with non-blocking mode
-	_serverFd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+	_serverFd = socket(AF_INET, SOCK_STREAM, 0);
 	if (_serverFd == -1)
 		throw SetupException("Socket failed; couldn't create Server FD");
+	fcntl(_serverFd, F_SETFL, O_NONBLOCK);
 
 	int opt = 1;
-	if (setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)  // allow the address/port to be reused sooner
+	if (setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
 	{
 		close(_serverFd);
 		throw SetupException("setsockopt failed");
@@ -60,7 +62,10 @@ Server::~Server()
 {
 	// notify clients that the server closed before closing the fds
 	for (std::map<int, User*>::iterator it = _users.begin(); it != _users.end(); ++it)
+	{
 		it->second->sendMessage("ERROR :Server is shutting down\r\n");
+		it->second->flushOutput();
+	}
 
 	// closing the fds before deleting the users
 	for (std::vector<struct pollfd>::iterator it = _fds.begin(); it != _fds.end(); ++it)
@@ -84,13 +89,14 @@ void Server::_acceptClient()
 
 	pollfd client;
 	client.fd = accept(_serverFd, (struct sockaddr*)&addr, &addrlen);
-	client.events = POLLIN; // tell poll to watch this fd for incoming data
-	client.revents = 0; // initialize the returned events field to zero, so it won't be mistakenly processed in the current poll iteration before poll has checked it
+	client.events = POLLIN;
+	client.revents = 0;
 	if (client.fd == -1)
 	{
-		std::cerr << "accept4 failed" << std::endl;
+		std::cerr << "accept failed" << std::endl;
 		return;
 	}
+	fcntl(client.fd, F_SETFL, O_NONBLOCK);
 	_fds.push_back(client);
 	_users[client.fd] = new User(client.fd, inet_ntoa(addr.sin_addr));
 
@@ -99,9 +105,22 @@ void Server::_acceptClient()
 
 void Server::run()
 {
-	// poll
 	while (g_running)
 	{
+		for (size_t i = 0; i < _fds.size(); ++i)
+		{
+			if (_fds[i].fd == _serverFd)
+			{
+				_fds[i].events = POLLIN; // listening socket only ever "reads" (accepts)
+				continue;
+			}
+
+			_fds[i].events = POLLIN; // always interested in incoming data
+
+			std::map<int, User*>::iterator it = _users.find(_fds[i].fd);
+			if (it != _users.end() && it->second->hasPendingOutput())
+				_fds[i].events |= POLLOUT; // also want to write, but only when we have data
+		}
 		if (poll(&_fds[0], _fds.size(), -1) == -1)
 		{
 			if (errno == EINTR)
@@ -116,17 +135,24 @@ void Server::run()
 		}
 		for (size_t i = 0; i < _fds.size(); i++)
 		{
-			short ready = _fds[i].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL);
-			if (!ready)
+			short revents = _fds[i].revents;
+			if (!revents)
 				continue;
 			if (_fds[i].fd == _serverFd)
-				_acceptClient();
-			else
 			{
-				(_handleClient(_fds[i].fd));
+				if (revents & POLLIN)
+					_acceptClient();
+				continue;
+			}
+			if (revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))
+				_handleClient(_fds[i].fd);
+			if (revents & POLLOUT)
+			{
+				std::map<int, User*>::iterator it = _users.find(_fds[i].fd);
+				if (it != _users.end())
+					it->second->flushOutput();
 			}
 		}
-		// pass 1: collect, don't touch the map
 		std::vector<int> toRemove;
 		for (std::map<int, User*>::iterator it = _users.begin(); it != _users.end(); ++it)
 		{
@@ -134,22 +160,21 @@ void Server::run()
 			toRemove.push_back(it->second->getFd());
 		}
 
-		// pass 2: now it's safe to erase
 		for (size_t i = 0; i < toRemove.size(); ++i)
 			_disconnectClient(toRemove[i]);
 
 	}
 }
 
-bool Server::_handleClient(int fd)
+void Server::_handleClient(int fd)
 {
 	char buffer[BUFFER_SIZE];
 	memset(buffer, 0, BUFFER_SIZE);
 
 	std::map<int, User*>::iterator it = _users.find(fd);
 	if (it == _users.end())
-		return false;
-	ssize_t bytes = recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT); // read data from socket into buffer
+		return ;
+	ssize_t bytes = recv(fd, buffer, sizeof(buffer), 0); // read data from socket into buffer
 	if (bytes <= 0) // in case recv fails . recv() can return -1 too, so bytes <= 0
 	{
 		it->second->setDisconnecting();
@@ -157,7 +182,7 @@ bool Server::_handleClient(int fd)
 		// _users.erase(it); // remove the map entry
 		// close(fd);
 		std::cout << "client disconnected" << std::endl;
-		return true;
+		return;
 	}
 	else // in case it works
 	{
@@ -169,10 +194,10 @@ bool Server::_handleClient(int fd)
 		{
 			//std::cout << line << std::endl;.... in order to generalise it:
 			if (_processCommand(fd, line))		//conditional for checking if user QUITTED
-				return (true);
+				return ;
 		}
 	}
-	return false;
+	return;
 }
 
 bool Server::_processCommand(int fd, std::string& line)
@@ -216,7 +241,11 @@ bool Server::_processCommand(int fd, std::string& line)
 	else if (cmd.command == "MODE")
 		_handleMode(fd, cmd);
 	else if (cmd.command == "CAP")
-		_users[fd]->sendMessage(":ircserv CAP * LS :\r\n");
+	{
+		// Only answer the LS query; ignore CAP END (and others) so we don't reply twice.
+		if (!cmd.params.empty() && cmd.params[0] == "LS")
+			_users[fd]->sendMessage(":ircserv CAP * LS :\r\n");
+	}
 	else if (cmd.command == "PING")
     	_handlePing(fd, cmd);
 	else if (cmd.command == "WHOIS")
@@ -240,7 +269,7 @@ void Server::_sendNumeric(int fd, const std::string& code, const std::string& te
 
 	if (nick.empty())
 		nick = "*";
-	
+
 	std::string msg = ":ircserv " + code + " " + nick + " " + text + "\r\n";
 
 	_users[fd]->sendMessage(msg);
@@ -279,20 +308,39 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 
 	if (channel.addUser(user, key))
 	{
-		std::string nick = _users[fd]->getNickname();
-
-		std::cout << nick << " joined " << channelName << std::endl;
-
-		if (nick.empty())		//defensive, because already handled in handleNick
-			nick = "*";
-
+		std::cout << _users[fd]->getNickname() << " joined " << channelName << std::endl;
 		std::string msg = _userPrefix(user) + " JOIN " + channelName + "\r\n";
 
 		_broadcastToChannel(channel, msg, fd);
 		_users[fd]->sendMessage(msg);
+
+		if (channel.getTopic().empty())
+			_sendNumeric(fd, "331", channelName + " :No topic is set");
+		else
+			_sendNumeric(fd, "332", channelName + " :" + channel.getTopic());
+
+		std::string namesList;
+
+		const std::set<User*>& users = channel.getUsers();
+		for (std::set<User*>::const_iterator it = users.begin(); it != users.end(); ++it)
+		{
+			if (channel.isOperator(*it))
+				namesList += "@";
+			namesList += (*it)->getNickname();
+			namesList += " ";
+		}
+		_sendNumeric(fd, "353", "= " + channelName + " :" + namesList);
+		_sendNumeric(fd, "366", channelName + " :End of /NAMES list");
 	}
 	else
 	{
+		Channel::JoinResult reason = channel.canJoin(user, key);
+		if (reason == Channel::JOIN_INVITEONLY)
+			_sendNumeric(fd, "473", channelName + " :Cannot join channel (+i)");
+		else if (reason == Channel::JOIN_BADKEY)
+			_sendNumeric(fd, "475", channelName + " :Cannot join channel (+k)");
+		else if (reason == Channel::JOIN_FULL)
+			_sendNumeric(fd, "471", channelName + " :Cannot join channel (+l)");
 		std::cout << _users[fd]->getNickname() << " could not join " << channelName << std::endl;
 	}
 
@@ -300,18 +348,59 @@ void Server::_handleJoin(int fd, const Command& cmd)		// IRC command = text endi
 	std::cout << "Channel users: " << channel.getUsers().size() << std::endl;
 }
 
+static bool isValidNickname(const std::string& nick)
+{
+	if (nick.empty() || nick.size() > 30)
+		return false;
+	if (std::isdigit(static_cast<unsigned char>(nick[0])))
+		return false;							  // can't start with a digit
+	for (size_t i = 0; i < nick.size(); ++i)
+	{
+		char c = nick[i];
+		if (!std::isalnum(static_cast<unsigned char>(c)) &&
+			c != '-' && c != '_' && c != '[' && c != ']' &&
+			c != '{' && c != '}' && c != '\\' && c != '|' &&
+			c != '^' && c != '`')
+			return false;						  // illegal character
+	}
+	return true;
+}
+
+
 void Server::_handleNick(int fd, const Command& cmd)
 {
 	if (cmd.params.empty())
+	{
+		_sendNumeric(fd, "431", ":No nickname given");
 		return ;
+	}
 
 	std::string newNick = cmd.params[0];
+
+	if (!isValidNickname(newNick))
+	{
+		_sendNumeric(fd, "432", newNick + " :Erroneous nickname");
+		return ;
+	}
+
 	if (_nicknameExists(newNick, fd))
 	{
 		_sendNumeric(fd, "433", newNick + " :Nickname is already in use");
 		return ;
 	}
+
+	bool registered = _users[fd]->isRegistered();
+	std::string oldPrefix = _userPrefix(_users[fd]);   // capture BEFORE the rename
 	_users[fd]->setNickname(newNick);
+
+	if (registered)
+	{
+		std::string msg = oldPrefix + " NICK :" + newNick + "\r\n";
+		_users[fd]->sendMessage(msg);				  // tell the user themselves
+		for (std::map<std::string, Channel>::iterator it = _channels.begin(); it != _channels.end(); ++it)
+			if (it->second.hasUser(_users[fd]))
+				_broadcastToChannel(it->second, msg, fd);  // others, skip self
+	}
 
 	std::cout << "fd " << fd << " is now nicknamed " << _users[fd]->getNickname() << std::endl;
 
@@ -461,6 +550,18 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUse
 	std::string target = cmd.params[0];
 	std::string msg = cmd.params[1];	//but actually is from 3 on...
 
+	if (target.empty())
+	{
+		_sendNumeric(fd, "411", ":Empty recipient");
+		return;
+	}
+
+	if (msg.empty())
+	{
+		_sendNumeric(fd, "412", ":No text to send");
+		return;
+	}
+
 	if (target[0] == '#')
 	{
 		// channel message. send message to everyboyd in the channel except the own user... :Groucho PRIVMSG #test :hello charlie
@@ -468,6 +569,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUse
 		std::map<std::string, Channel>::iterator it = _channels.find(target);
 		if (it == _channels.end())
 		{
+			_sendNumeric(fd, "403", target + " :No such channel");
 			std::cout << "No such channel: " << target << std::endl;
 			return ;
 		}
@@ -476,6 +578,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUse
 
 		if (!channel.hasUser(user))
 		{
+			_sendNumeric(fd, "404", target + " :Cannot send to channel");
 			std::cout << "User is not in the channel: " << target << std::endl;
 			return ;
 		}
@@ -488,6 +591,7 @@ void Server::_handlePrivmsg(int fd, const Command& cmd)			//similar to handleUse
 		User* targetUser = _findUserByNickname(target);
 		if (!targetUser)
 		{
+			_sendNumeric(fd, "401", target + " :No such nick");
 			std::cout << "No such nick: " << target << std::endl;
 			return ;
 		}
@@ -520,6 +624,7 @@ void Server::_handlePart(int fd, const Command& cmd)
 	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
 	if (it == _channels.end())
 	{
+		_sendNumeric(fd, "403", channelName + " :No such channel");
 		std::cout << "PART: no such channel " << channelName << std::endl;
 		return ;
 	}
@@ -528,6 +633,7 @@ void Server::_handlePart(int fd, const Command& cmd)
 
 	if (!channel.hasUser(user))
 	{
+		_sendNumeric(fd, "442", channelName + " :You're not on that channel");
 		std::cout << "PART: user is not in channel " << channelName << std::endl;
 		return ;
 	}
@@ -563,27 +669,15 @@ bool Server::_handleQuit(int fd, const Command& cmd)
 					+ reason
 					+ "\r\n";
 
-	for (std::map<std::string, Channel>::iterator it = _channels.begin(); it != _channels.end(); )
+	for (std::map<std::string, Channel>::iterator it = _channels.begin(); it != _channels.end(); ++it)
 	{
 		Channel& channel = it->second;
 
 		if (channel.hasUser(user))
-		{
 			_broadcastToChannel(channel, msg, fd);
-			channel.removeUser(user);
-		}
-
-		if (channel.getUsers().empty())
-			_channels.erase(it++);		// the user can be in several channels
-		else
-			++it;
 	}
 
 	_users[fd]->setDisconnecting(); // setting the flag instead of deleting here
-	// close(fd);
-	// delete _users[fd];
-	// _users.erase(fd);
-
 	return (true);
 }
 
@@ -601,6 +695,7 @@ void Server::_handleTopic(int fd, const Command& cmd)
 	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
 	if (it == _channels.end())
 	{
+		_sendNumeric(fd, "403", channelName + " :No such channel");
 		std::cout << "TOPIC: no such channel " << channelName << std::endl;
 		return ;
 	}
@@ -609,12 +704,17 @@ void Server::_handleTopic(int fd, const Command& cmd)
 
 	if (cmd.params.size() == 1)
 	{
+		if (channel.getTopic().empty())
+			_sendNumeric(fd, "331", channelName + " :No topic is set");
+		else
+			_sendNumeric(fd, "332", channelName + " :" + channel.getTopic());
 		std::cout << "Current topic for " << channelName << ": " << channel.getTopic() << std::endl;
 		return ;
 	}
 
 	if (!channel.canChangeTopic(user))
 	{
+		_sendNumeric(fd, "482", channelName + " :You're not channel operator");
 		std::cout << "TOPIC: user cannot change topic" << std::endl;
 		return ;
 	}
@@ -643,6 +743,7 @@ void Server::_handleInvite(int fd, const Command& cmd)
 	User* invitedUser = _findUserByNickname(targetNick);
 	if (!invitedUser)
 	{
+		_sendNumeric(fd, "401", targetNick + " :No such nick");
 		std::cout << "INVITE: no such nick " << targetNick << std::endl;
 		return ;
 	}
@@ -650,6 +751,7 @@ void Server::_handleInvite(int fd, const Command& cmd)
 	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
 	if (it == _channels.end())
 	{
+		_sendNumeric(fd, "403", channelName + " :No such channel");
 		std::cout << "INVITE: no such channel " << channelName << std::endl;
 		return ;
 	}
@@ -658,16 +760,19 @@ void Server::_handleInvite(int fd, const Command& cmd)
 
 	if (!channel.hasUser(inviter))
 	{
+		_sendNumeric(fd, "442", channelName + " :You're not on that channel");
 		std::cout << "INVITE: inviter is not in the channel " << channelName << std::endl;
 		return ;
 	}
 	if (!channel.isOperator(inviter))
 	{
+		_sendNumeric(fd, "482", channelName + " :You're not channel operator");
 		std::cout << "INVITE: inviter is not operator" << std::endl;
 		return ;
 	}
 	if (channel.hasUser(invitedUser))
 	{
+		_sendNumeric(fd, "443", targetNick + " " + channelName + " :is already on channel");
 		std::cout << "INVITE: user already in channel " << channelName << std::endl;
 		return ;
 	}
@@ -677,6 +782,8 @@ void Server::_handleInvite(int fd, const Command& cmd)
 	std::string msg = ":" + inviter->getNickname() + " INVITE " + invitedUser->getNickname() + " " + channelName + "\r\n";
 
 	invitedUser->sendMessage(msg);
+
+	_sendNumeric(fd, "341", invitedUser->getNickname() + " " + channelName);
 
 	std::cout << inviter->getNickname() << " invited " << invitedUser->getNickname() << " to " << channelName << std::endl;
 }
@@ -697,18 +804,22 @@ void Server::_handleKick(int fd, const Command& cmd)
 	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
 	if (it == _channels.end())
 	{
+		_sendNumeric(fd, "403", channelName + " :No such channel");
 		std::cout << "KICK: no such channel" << std::endl;
+		return;
 	}
 
 	Channel& channel = it->second;
 
 	if (!channel.hasUser(kicker))
 	{
+		_sendNumeric(fd, "442", channelName + " :You're not on that channel");
 		std::cout << "KICK: kicker is not in the channel " << channelName << std::endl;
 		return ;
 	}
 	if (!channel.isOperator(kicker))
 	{
+		_sendNumeric(fd, "482", channelName + " :You're not channel operator");
 		std::cout << "KICK: kicker is not operator" << std::endl;
 		return ;
 	}
@@ -716,12 +827,14 @@ void Server::_handleKick(int fd, const Command& cmd)
 	User *target = _findUserByNickname(targetNick);
 	if (!target)
 	{
+		_sendNumeric(fd, "401", targetNick + " :No such nick");
 		std::cout << "KICK: no such nick" << std::endl;
 		return ;
 	}
 
 	if (!channel.hasUser(target))
 	{
+		_sendNumeric(fd, "441", targetNick + " " + channelName + " :They aren't on that channel");
 		std::cout << "KICK: user not in the channel " << channelName << std::endl;
 		return ;
 	}
@@ -748,13 +861,16 @@ void Server::_handleMode(int fd, const Command& cmd)
 	std::string channelName = cmd.params[0];
     if (channelName.empty() || channelName[0] != '#')
     {
-        std::cout << "MODE: invalid channel" << std::endl;
+        // Non-channel target = user-mode query (irssi auto-sends "MODE <nick>" on
+        // connect). No user modes are implemented, so report an empty mode set.
+        _sendNumeric(fd, "221", "+");
         return;
     }
 
 	std::map<std::string, Channel>::iterator it = _channels.find(channelName);
 	if (it == _channels.end())
 	{
+		_sendNumeric(fd, "403", channelName + " :No such channel");
 		std::cout << "MODE: no such channel" << channelName << std::endl;
 		return ;
 	}
@@ -763,20 +879,31 @@ void Server::_handleMode(int fd, const Command& cmd)
 
 	if (cmd.params.size() == 1)
 	{
+		_sendNumeric(fd, "324", channelName + " " + channel.getModeString());
 		std::cout << "Current modes: " << channel.getModeString() << std::endl;
 		return ;
 	}
 
 	std::string mode = cmd.params[1];
 
+	// Ban-list query (irssi auto-sends "MODE #chan b" on join). It's a read, not a
+	// change, so answer with an empty ban list and don't require operator status.
+	if (mode == "b" || mode == "+b" || mode == "-b")
+	{
+		_sendNumeric(fd, "368", channelName + " :End of channel ban list");
+		return ;
+	}
+
 	if (!channel.hasUser(user))
 	{
+		_sendNumeric(fd, "442", channelName + " :You're not on that channel");
 		std::cout << "MODE: user is not in the channel" << std::endl;
 		return ;
 	}
 
 	if (!channel.isOperator(user))
 	{
+		_sendNumeric(fd, "482", channelName + " :You're not channel operator");
 		std::cout << "MODE: user is not operator" << std::endl;
 		return ;
 	}
@@ -800,6 +927,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 		{
 			if (cmd.params.size() < 3)
 			{
+				_sendNumeric(fd, "461", "MODE :Not enough parameters");
 				std::cout << "MODE +k: missing key" << std::endl;
 				return ;
 			}
@@ -814,12 +942,14 @@ void Server::_handleMode(int fd, const Command& cmd)
 		{
 			if (cmd.params.size() < 3)
 			{
+				_sendNumeric(fd, "461", "MODE :Not enough parameters");
 				std::cout << "MODE +l: missing limit" << std::endl;
 				return ;
 			}
-
-			size_t limit = std::atoi(cmd.params[2].c_str());
-			if (limit == 0)
+			long limit;
+			std::istringstream iss(cmd.params[2]);
+			iss >> limit;
+			if  (iss.fail() || !iss.eof() || limit <= 0)
 			{
 				std::cout << "MODE +l: invalid limit" << std::endl;
 				return ;
@@ -833,6 +963,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 	{
 		if (cmd.params.size() < 3)
 		{
+			_sendNumeric(fd, "461", "MODE :Not enough parameters");
 			std::cout << "MODE +/-o: missing nick" << std::endl;
 			return ;
 		}
@@ -840,6 +971,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 		User* target = _findUserByNickname(cmd.params[2]);
 		if (!target || !channel.hasUser(target))
 		{
+			_sendNumeric(fd, "441", cmd.params[2] + " " + channelName + " :They aren't on that channel");
 			std::cout << "MODE +/- o: target not in channel" << std::endl;
 			return ;
 		}
@@ -851,6 +983,7 @@ void Server::_handleMode(int fd, const Command& cmd)
 	}
 	else
 	{
+		_sendNumeric(fd, "472", std::string(1, flag) + " :is unknown mode char to me");
 		std::cout << "MODE: unknown mode" << flag << std::endl;
 		return ;
 	}
@@ -866,17 +999,28 @@ void Server::_handleMode(int fd, const Command& cmd)
 
 void Server::_disconnectClient(int fd)
 {
-
-    for (size_t i = 0; i < _fds.size(); ++i)
+	User* user = _users[fd];
+	for (std::map<std::string, Channel>::iterator it = _channels.begin(); it != _channels.end(); )
 	{
-        if (_fds[i].fd == fd)
+		Channel& channel = it->second;
+		channel.removeUser(user);
+
+		if (channel.getUsers().empty())
+			_channels.erase(it++);
+		else
+			++it;
+	}
+
+	for (size_t i = 0; i < _fds.size(); ++i)
+	{
+		if (_fds[i].fd == fd)
 		{
 			_fds.erase(_fds.begin() + i);
 			break;
 		}
 	}
 	close(fd);
-	delete _users[fd];
+	delete user;
 	_users.erase(fd);
 }
 

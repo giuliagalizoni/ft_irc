@@ -1,8 +1,0 @@
-<< CAP LS
-<< NICK apaz-mar
-<< USER apaz-mar apaz-mar localhost :apaz-mar
->> :ircserv CAP * LS :
-<< CAP END
->> :ircserv 433 * apaz-mar :Nickname is already in use
-<< NICK apaz-mar_
->> :ircserv CAP * LS :

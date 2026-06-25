@@ -3,8 +3,6 @@
 #include <iostream>
 #include <string>
 #include <sys/socket.h>
-#include <cerrno>
-
 
 User::User(int fd, const std::string& hostname)
 	: 	_fd(fd),
@@ -52,26 +50,27 @@ bool User::getNextLine(std::string& line)
 
 void User::sendMessage(const std::string& msg)
 {
-	ssize_t bytesSent =  0;
-
-	while (bytesSent < (ssize_t)msg.size())
-	{
-		ssize_t result = send(_fd, msg.c_str() + bytesSent, msg.size() - bytesSent, MSG_DONTWAIT);
-		if (result == -1)
-		{
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				break;
-			else
-			{
-				_disconnecting = true;
-				std::cerr << "send error" << std::endl;
-				break;
-			}
-		}
-		bytesSent += result;
-	}
+	_outBuffer += msg;
 }
 
+bool User::hasPendingOutput() const
+{
+	return !_outBuffer.empty();
+}
+
+void User::flushOutput()
+{
+	ssize_t bytesSent =  0;
+
+	if (_outBuffer.empty())
+		return;
+
+	bytesSent = send(_fd, _outBuffer.c_str(), _outBuffer.size(), 0);
+	if (bytesSent > 0)
+		_outBuffer.erase(0, bytesSent);
+	else if (bytesSent == -1)
+		_disconnecting = true;
+}
 
 int User::getFd() const
 {

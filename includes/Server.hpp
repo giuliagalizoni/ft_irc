@@ -28,7 +28,7 @@ class Server
 
 		// helper functions to run()
 		void _acceptClient(); // accept part
-		bool _handleClient(int fd); // recv part
+		void _handleClient(int fd); // recv part
 
 		bool _processCommand(int fd, std::string& line);
 		void _handleJoin(int fd, const Command& cmd);
